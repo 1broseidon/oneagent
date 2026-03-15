@@ -19,11 +19,21 @@ oa "explain this codebase"
 # Use a different backend
 oa -b codex "fix the auth bug"
 
+# Start or continue a portable thread
+oa -t auth-fix "investigate the failing auth tests"
+oa -b codex -t auth-fix "patch the bug"
+oa -b claude -t auth-fix "summarize what changed"
+
 # Specify model and working directory
 oa -b pi -m "google/gemini-2.5-pro" -C ~/project "add tests"
 
 # Resume a session
 oa -b claude -s abc123 "now refactor it"
+
+# Inspect or compact saved threads
+oa thread list
+oa thread show auth-fix
+oa thread compact auth-fix
 
 # List configured backends
 oa list
@@ -37,6 +47,7 @@ Every invocation returns normalized JSON:
 {
   "result": "Here's what I found...",
   "session": "abc123-def456",
+  "thread_id": "auth-fix",
   "backend": "claude"
 }
 ```
@@ -47,10 +58,32 @@ On error:
 {
   "result": "",
   "session": "",
+  "thread_id": "auth-fix",
   "backend": "cline",
   "error": "Unauthorized: Please sign in to Cline before trying again."
 }
 ```
+
+## Portable threads
+
+Use `-t/--thread` to make `oneagent` own the conversation history instead of relying only on a backend-native session ID.
+
+Thread behavior:
+
+- Same backend, same thread: reuse that backend's native session when that backend was the last contributor.
+- Switched backends: rebuild context from the saved thread summary and turns, then continue on the new backend.
+- `--thread` and `--session` are mutually exclusive.
+- Threads are stored locally in `~/.local/state/oneagent/threads/<id>.json`.
+
+Thread commands:
+
+```sh
+oa thread list
+oa thread show <id>
+oa thread compact <id> [-b backend]
+```
+
+`oa thread compact` summarizes older turns and keeps recent turns verbatim so long-running threads stay portable without growing without bound.
 
 ## Configuration
 
@@ -128,6 +161,20 @@ resp := oneagent.Run(backends, oneagent.RunOpts{
 
 fmt.Println(resp.Result)
 fmt.Println(resp.Session) // for resume
+```
+
+Portable threads from Go:
+
+```go
+resp := oneagent.RunWithThread(backends, oneagent.RunOpts{
+    Backend:  "claude",
+    ThreadID: "auth-fix",
+    Prompt:   "continue debugging",
+    CWD:      "/path/to/project",
+})
+
+fmt.Println(resp.Result)
+fmt.Println(resp.ThreadID)
 ```
 
 ## Supported backends

@@ -35,10 +35,11 @@ type Backend struct {
 
 // Response is the normalized output from any backend.
 type Response struct {
-	Result  string `json:"result"`
-	Session string `json:"session"`
-	Backend string `json:"backend"`
-	Error   string `json:"error,omitempty"`
+	Result   string `json:"result"`
+	Session  string `json:"session"`
+	ThreadID string `json:"thread_id,omitempty"`
+	Backend  string `json:"backend"`
+	Error    string `json:"error,omitempty"`
 }
 
 // RunOpts configures a single agent invocation.
@@ -48,6 +49,7 @@ type RunOpts struct {
 	Model     string
 	CWD       string
 	SessionID string
+	ThreadID  string
 }
 
 // ConfigDir returns the default config directory (~/.config/oneagent).
