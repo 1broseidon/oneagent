@@ -7,8 +7,44 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/george/oneagent"
+	"github.com/1broseidon/oneagent"
 )
+
+type cliOpts struct {
+	backend    string
+	model      string
+	cwd        string
+	session    string
+	configPath string
+	prompt     []string
+}
+
+func parseArgs(args []string) cliOpts {
+	var o cliOpts
+	flags := map[string]*string{
+		"-b": &o.backend, "--backend": &o.backend,
+		"-m": &o.model, "--model": &o.model,
+		"-C": &o.cwd, "--cwd": &o.cwd,
+		"-s": &o.session, "--session": &o.session,
+		"-c": &o.configPath, "--config": &o.configPath,
+	}
+	for i := 0; i < len(args); i++ {
+		if dst, ok := flags[args[i]]; ok && i+1 < len(args) {
+			*dst = args[i+1]
+			i++
+		} else {
+			o.prompt = append(o.prompt, args[i])
+		}
+	}
+	return o
+}
+
+func resolveConfig(path string) string {
+	if path != "" {
+		return path
+	}
+	return filepath.Join(oneagent.ConfigDir(), "backends.json")
+}
 
 func main() {
 	args := os.Args[1:]
@@ -18,73 +54,35 @@ func main() {
 		return
 	}
 
-	backend := ""
-	model := ""
-	cwd := ""
-	session := ""
-	configPath := ""
-	var prompt []string
-
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "-b", "--backend":
-			if i+1 < len(args) {
-				backend = args[i+1]
-				i++
-			}
-		case "-m", "--model":
-			if i+1 < len(args) {
-				model = args[i+1]
-				i++
-			}
-		case "-C", "--cwd":
-			if i+1 < len(args) {
-				cwd = args[i+1]
-				i++
-			}
-		case "-s", "--session":
-			if i+1 < len(args) {
-				session = args[i+1]
-				i++
-			}
-		case "-c", "--config":
-			if i+1 < len(args) {
-				configPath = args[i+1]
-				i++
-			}
-		case "list":
-			listBackends(configPath)
-			return
-		default:
-			prompt = append(prompt, args[i])
-		}
+	if args[0] == "list" {
+		listBackends(resolveConfig(""))
+		return
 	}
 
-	if len(prompt) == 0 {
+	o := parseArgs(args)
+
+	if len(o.prompt) == 0 {
 		fmt.Fprintln(os.Stderr, "error: no prompt provided")
 		os.Exit(1)
 	}
 
-	if configPath == "" {
-		configPath = filepath.Join(oneagent.ConfigDir(), "backends.json")
-	}
-
-	backends, err := oneagent.LoadBackends(configPath)
+	backends, err := oneagent.LoadBackends(resolveConfig(o.configPath))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 
+	backend := o.backend
 	if backend == "" {
 		backend = "claude"
 	}
 
 	resp := oneagent.Run(backends, oneagent.RunOpts{
 		Backend:   backend,
-		Prompt:    strings.Join(prompt, " "),
-		Model:     model,
-		CWD:       cwd,
-		SessionID: session,
+		Prompt:    strings.Join(o.prompt, " "),
+		Model:     o.model,
+		CWD:       o.cwd,
+		SessionID: o.session,
 	})
 
 	out, _ := json.MarshalIndent(resp, "", "  ")
@@ -96,9 +94,6 @@ func main() {
 }
 
 func listBackends(configPath string) {
-	if configPath == "" {
-		configPath = filepath.Join(oneagent.ConfigDir(), "backends.json")
-	}
 	backends, err := oneagent.LoadBackends(configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -114,7 +109,7 @@ func listBackends(configPath string) {
 }
 
 func usage() {
-	fmt.Println(`oa — one agent, any backend
+	fmt.Println(`oa - one agent, any backend
 
 Usage:
   oa [flags] <prompt>
@@ -132,5 +127,5 @@ Output:
 
 Config:
   Define backends in ~/.config/oneagent/backends.json.
-  See https://github.com/george/oneagent for format.`)
+  See https://github.com/1broseidon/oneagent for format.`)
 }

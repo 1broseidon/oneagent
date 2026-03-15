@@ -1,3 +1,3 @@
-module github.com/george/oneagent
+module github.com/1broseidon/oneagent
 
 go 1.25.7

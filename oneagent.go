@@ -70,12 +70,7 @@ func LoadBackends(path string) (map[string]Backend, error) {
 }
 
 // Run executes a prompt against the specified backend and returns a normalized response.
-func Run(backends map[string]Backend, opts RunOpts) Response {
-	b, ok := backends[opts.Backend]
-	if !ok {
-		return Response{Error: "backend not configured: " + opts.Backend, Backend: opts.Backend}
-	}
-
+func buildCmd(b Backend, opts RunOpts) *exec.Cmd {
 	model := opts.Model
 	if model == "" {
 		model = b.DefaultModel
@@ -99,15 +94,22 @@ func Run(backends map[string]Backend, opts RunOpts) Response {
 	}
 	args := substArgs(tmpl, vars)
 
-	if len(args) == 0 {
-		return Response{Error: "backend command template is empty", Backend: opts.Backend}
-	}
-
 	cmd := exec.Command(args[0], args[1:]...)
 	if opts.CWD != "" && !containsVar(b.Cmd, "{cwd}") {
 		cmd.Dir = opts.CWD
 	}
 	cmd.Env = os.Environ()
+	return cmd
+}
+
+// Run executes a prompt against the specified backend and returns a normalized response.
+func Run(backends map[string]Backend, opts RunOpts) Response {
+	b, ok := backends[opts.Backend]
+	if !ok {
+		return Response{Error: "backend not configured: " + opts.Backend, Backend: opts.Backend}
+	}
+
+	cmd := buildCmd(b, opts)
 
 	var result, session string
 	var err error
@@ -120,7 +122,6 @@ func Run(backends map[string]Backend, opts RunOpts) Response {
 	}
 
 	resp := Response{Result: result, Session: session, Backend: opts.Backend}
-
 	if err != nil {
 		log.Printf("%s error: %v", opts.Backend, err)
 		if result != "" {
@@ -217,29 +218,32 @@ func runJSONL(cmd *exec.Cmd, b Backend) (result, session string, err error) {
 	return result, session, err
 }
 
+func extractField(line map[string]any, when, field string) string {
+	if when != "" && matchWhen(line, when) {
+		if v, _ := jsonGet(line, field).(string); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func scanJSONL(scanner *bufio.Scanner, b Backend) (result, session, lastErr string) {
 	for scanner.Scan() {
 		var line map[string]any
 		if err := json.Unmarshal(scanner.Bytes(), &line); err != nil {
 			continue
 		}
-		if b.ErrorWhen != "" && matchWhen(line, b.ErrorWhen) {
-			if v, _ := jsonGet(line, b.Error).(string); v != "" {
-				lastErr = v
-			}
+		if v := extractField(line, b.ErrorWhen, b.Error); v != "" {
+			lastErr = v
 		}
-		if b.SessionWhen != "" && matchWhen(line, b.SessionWhen) {
-			if v, _ := jsonGet(line, b.Session).(string); v != "" {
-				session = v
-			}
+		if v := extractField(line, b.SessionWhen, b.Session); v != "" {
+			session = v
 		}
-		if b.ResultWhen != "" && matchWhen(line, b.ResultWhen) {
-			if v, _ := jsonGet(line, b.Result).(string); v != "" {
-				if b.ResultAppend {
-					result += v
-				} else {
-					result = v
-				}
+		if v := extractField(line, b.ResultWhen, b.Result); v != "" {
+			if b.ResultAppend {
+				result += v
+			} else {
+				result = v
 			}
 		}
 	}
