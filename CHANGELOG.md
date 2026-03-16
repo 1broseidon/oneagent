@@ -2,6 +2,25 @@
 
 All notable changes to oneagent are documented here.
 
+## [0.10.1] - 2026-03-16
+
+### Added
+
+- Activity events for the OpenCode backend — tool use (file reads, patches) now appears in JSONL streaming output.
+- `oa-dispatch` agent skill for dispatching tasks to other agents, following the [agentskills.io](https://agentskills.io) spec. Install with `npx skills add 1broseidon/oneagent --skill oa-dispatch`.
+
+### Improved
+
+- Rewrote all public-facing docs for clarity and correctness: README, library guide, config reference, integration example, and changelog.
+- README now leads with a clear value proposition and includes prerequisites.
+- Library docs updated to use the Client-based API introduced in 0.9.0.
+- Integration example replaced with a complete, runnable `main.go`.
+- Config docs include all four backend examples with verified minimum flags for non-interactive execution.
+
+### Fixed
+
+- Claude backend now includes `--dangerously-skip-permissions` — required for write and bash operations since `-p` mode only permits reads.
+
 ## [0.10.0] - 2026-03-16
 
 ### Added
