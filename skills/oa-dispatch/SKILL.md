@@ -93,6 +93,8 @@ After the task completes, verify the changes:
 git diff path/to/file.go
 ```
 
+**Timeouts:** Dispatched tasks can take anywhere from 30 seconds to 30 minutes depending on complexity. When running `oa` from a shell tool, set a timeout of at least 10 minutes (600000ms). The default 2-minute timeout will kill most non-trivial tasks prematurely.
+
 **Parallelism rule:** You can dispatch multiple tasks in parallel if they edit different files. If multiple tasks touch the same file, run them sequentially — otherwise the later task may overwrite or conflict with the earlier one.
 
 ## Using threads for multi-step tasks
