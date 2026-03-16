@@ -78,6 +78,8 @@ Numeric path segments index into arrays, so `.0.` is valid.
 
 ## Example Backends
 
+These are the embedded defaults that ship with `oa`. Each uses the minimum flags needed for non-interactive execution — no extra permission flags required. Claude's `-p` mode and Codex's `--full-auto` handle permissions automatically. Override any of these in `~/.config/oneagent/backends.json` if you need different flags.
+
 **Claude:**
 
 ```json
@@ -126,6 +128,8 @@ Numeric path segments index into arrays, so `.0.` is valid.
   "run": "opencode run {prompt} --format json --dir {cwd} --model {model}",
   "resume": "+ --session {session}",
   "format": "jsonl",
+  "activity": "{part.tool} {part.state.input.filePath}",
+  "activity_when": "type=tool_use",
   "result": "part.text",
   "result_when": "type=text",
   "session": "sessionID",
