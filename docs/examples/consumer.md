@@ -1,21 +1,21 @@
-# Consumer Example: tele
+# Consumer Example
 
-[`tele`](../../../tele/main.go) is a small Telegram bot that consumes `oneagent` as a Go library.
+This page describes a typical embedded consumer of `oneagent` as a Go library, such as a chat app, bot, TUI, editor integration, or service wrapper.
 
-## What tele Stores Itself
+## What the Consumer Stores Itself
 
-`tele` keeps its own app-level state:
+The consumer typically keeps its own app-level state:
 
 - selected backend
 - selected model
 - selected thread ID
-- Telegram cursor position
+- UI-specific cursor or delivery state
 
 That state lives in its own config directory and is separate from `oneagent`.
 
-## What tele Delegates to oneagent
+## What the Consumer Delegates to oneagent
 
-For agent execution, `tele` delegates almost everything:
+For agent execution, the consumer delegates almost everything:
 
 - backend dispatch
 - session handling
@@ -31,11 +31,11 @@ resp := oneagent.RunWithThreadStream(backends, opts, emit)
 
 ## UI Pattern
 
-`tele` sends a placeholder Telegram message, then:
+The consumer creates a placeholder or pending UI state, then:
 
 1. logs `activity` events
 2. accumulates `delta` text
-3. edits the Telegram message periodically
+3. updates the UI periodically
 4. replaces the placeholder with `resp.Result` at the end
 
 This is a good example of the intended library contract:
@@ -45,7 +45,7 @@ This is a good example of the intended library contract:
 
 ## Why This Example Matters
 
-`tele` is a useful reference for other consumers because it shows how little glue is needed once `oneagent` provides:
+This pattern is useful because it shows how little glue is needed once `oneagent` provides:
 
 - a stable `RunOpts` input
 - normalized `Response`

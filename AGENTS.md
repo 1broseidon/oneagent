@@ -13,7 +13,7 @@ A Go library and CLI that wrap AI agent CLIs behind one normalized interface. Bu
 - `README.md` — landing page and CLI quick start
 - `docs/library.md` — detailed Go embedding guide
 - `docs/config.md` — backend config schema and examples
-- `docs/examples/tele.md` — concrete consumer example
+- `docs/examples/consumer.md` — concrete consumer example
 
 ## Architecture
 

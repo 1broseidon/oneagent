@@ -55,9 +55,10 @@ Built-in defaults ship for `claude`, `codex`, `opencode`, and `pi`, so `oa` work
 
 ## Docs
 
+- Release history: [CHANGELOG.md](./CHANGELOG.md)
 - Library guide: [docs/library.md](./docs/library.md)
 - Backend config reference: [docs/config.md](./docs/config.md)
-- Consumer example: [docs/examples/tele.md](./docs/examples/tele.md)
+- Consumer example: [docs/examples/consumer.md](./docs/examples/consumer.md)
 
 ## Output
 

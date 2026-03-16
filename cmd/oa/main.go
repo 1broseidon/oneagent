@@ -352,7 +352,7 @@ Usage:
   oa thread show <id>            Show thread contents
   oa thread compact <id> [-b]    Summarize old turns
 
-	Flags:
+Flags:
   -b, --backend <name>           Backend to use (default: claude)
   -m, --model <model>            Model override
   -C, --cwd <dir>                Working directory
@@ -360,7 +360,7 @@ Usage:
   --jsonl                        Alias for --stream --json
   -s, --session <id>             Resume session (mutually exclusive with -t)
   --text                         Emit plain text output (default)
-  --stream                       Emit normalized JSONL events while running
+  --stream                       Stream live output while running
   -t, --thread <id>              Start or continue a thread
   -c, --config <path>            Use only this config file
 
@@ -369,6 +369,7 @@ Output:
   --json: final JSON with result, session, thread_id, backend, and error fields.
   --stream: live text with activity lines and streamed assistant text.
   --stream --json: normalized JSONL events with session, activity, delta, and final done/error records.
+  --jsonl: shortcut for --stream --json.
 Config:
   Built-in defaults: claude, codex, opencode, pi.
   ~/.config/oneagent/backends.json adds or replaces backends.

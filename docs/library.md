@@ -142,4 +142,4 @@ The most common embedding pattern is:
 3. Render `activity` and `delta` incrementally in your UI.
 4. Replace or finalize the UI with `resp.Result` once the stream ends.
 
-See [tele.md](./examples/tele.md) for a concrete example.
+See [consumer.md](./examples/consumer.md) for a concrete example.

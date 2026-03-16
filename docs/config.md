@@ -2,7 +2,7 @@
 
 Backends are defined in JSON and compiled into canonical `Backend` structs at runtime.
 
-## Loading Model
+## Loading Config
 
 `oneagent` ships embedded defaults for:
 
