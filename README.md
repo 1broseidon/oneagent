@@ -66,7 +66,11 @@ git diff internal/auth/handler.go
 
 The normalized output means the outer agent can parse results from any backend without special handling. Portable threads let you chain follow-ups across models.
 
-An [agent skill](./skills/oa-dispatch/) is included for agents that support the [Agent Skills](https://agentskills.io) format.
+An [agent skill](./skills/oa-dispatch/) is included for agents that support the [Agent Skills](https://agentskills.io) format. Install it with:
+
+```sh
+npx skills add 1broseidon/oneagent --skill oa-dispatch
+```
 
 ## Output
 
