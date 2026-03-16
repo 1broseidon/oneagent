@@ -53,6 +53,12 @@ oa list
 
 Built-in defaults ship for `claude`, `codex`, `opencode`, and `pi`, so `oa` works on first run if those CLIs are installed and signed in.
 
+## Docs
+
+- Library guide: [docs/library.md](./docs/library.md)
+- Backend config reference: [docs/config.md](./docs/config.md)
+- Consumer example: [docs/examples/tele.md](./docs/examples/tele.md)
+
 ## Output
 
 By default, `oa` prints plain text:
@@ -124,6 +130,8 @@ oa thread compact <id> [-b backend]
 `oa thread compact` summarizes older turns and keeps recent turns verbatim so long-running threads stay portable without growing without bound.
 
 ## Configuration
+
+For the full backend config reference, examples, and matching rules, see [docs/config.md](./docs/config.md).
 
 `oa` embeds default configs for `claude`, `codex`, `opencode`, and `pi`.
 
@@ -212,12 +220,15 @@ Activity templates can interpolate dot-paths with `{...}` placeholders. Numeric 
 
 ## Use as a library
 
+For the full library embedding guide, see [docs/library.md](./docs/library.md).
+
 ```go
 import "github.com/1broseidon/oneagent"
 
 backends, _ := oneagent.LoadBackends("") // embedded defaults + ~/.config overlay
+client := oneagent.Client{Backends: backends}
 
-resp := oneagent.Run(backends, oneagent.RunOpts{
+resp := client.Run(oneagent.RunOpts{
     Backend: "claude",
     Prompt:  "explain this code",
     CWD:     "/path/to/project",
@@ -230,7 +241,7 @@ fmt.Println(resp.Session) // for resume
 Streaming from Go:
 
 ```go
-oneagent.RunStream(backends, oneagent.RunOpts{
+client.RunStream(oneagent.RunOpts{
     Backend: "claude",
     Prompt:  "review the repo",
     CWD:     "/path/to/project",
@@ -242,7 +253,7 @@ oneagent.RunStream(backends, oneagent.RunOpts{
 Portable threads from Go:
 
 ```go
-resp := oneagent.RunWithThread(backends, oneagent.RunOpts{
+resp := client.RunWithThread(oneagent.RunOpts{
     Backend:  "claude",
     ThreadID: "auth-fix",
     Prompt:   "continue debugging",
@@ -251,6 +262,24 @@ resp := oneagent.RunWithThread(backends, oneagent.RunOpts{
 
 fmt.Println(resp.Result)
 fmt.Println(resp.ThreadID)
+```
+
+Package-level helpers such as `oneagent.Run`, `oneagent.RunWithThread`, `oneagent.ListThreads`, and `oneagent.CompactThread` still work and use the default filesystem-backed thread store for backward compatibility.
+
+Custom thread storage:
+
+```go
+store := oneagent.FilesystemStore{Dir: "/tmp/my-app-threads"}
+client := oneagent.Client{
+    Backends: backends,
+    Store:    store,
+}
+
+resp := client.RunWithThread(oneagent.RunOpts{
+    Backend:  "claude",
+    ThreadID: "chat-42",
+    Prompt:   "continue debugging",
+})
 ```
 
 ## Supported backends
