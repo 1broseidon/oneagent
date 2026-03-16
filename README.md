@@ -11,17 +11,19 @@ Config-driven multi-agent CLI.
 
 ## Install
 
+Go install:
+
+```sh
+go install github.com/1broseidon/oneagent/cmd/oa@latest
+```
+
+This is currently the recommended path on macOS. The Homebrew tap uses a cask that installs a downloaded binary, so macOS Gatekeeper may block it until the project ships a signed and notarized macOS distribution or moves to a formula-based install.
+
 Homebrew:
 
 ```sh
 brew tap 1broseidon/tap
 brew install --cask 1broseidon/tap/oa
-```
-
-Or install directly with Go:
-
-```sh
-go install github.com/1broseidon/oneagent/cmd/oa@latest
 ```
 
 ## Quick start
@@ -205,7 +207,6 @@ Any CLI that outputs JSON or line-delimited JSON can be added via [config](./doc
 - [Go library guide](./docs/library.md)
 - [Backend config reference](./docs/config.md)
 - [Integration example](./docs/examples/consumer.md)
-- [Release and distribution guide](./docs/release.md)
 - [Agent skill for dispatch](./skills/oa-dispatch/)
 
 ## License
