@@ -11,9 +11,10 @@ Config-driven multi-agent CLI.
 
 ## Install
 
-Homebrew, after the tap repo is created and the first tagged release is published:
+Homebrew:
 
 ```sh
+brew tap 1broseidon/tap
 brew install --cask 1broseidon/tap/oa
 ```
 
