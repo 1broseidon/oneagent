@@ -280,6 +280,9 @@ resp := client.RunWithThread(oneagent.RunOpts{
     ThreadID: "chat-42",
     Prompt:   "continue debugging",
 })
+
+thread, _ := client.LoadThread("chat-42")
+ids, _ := client.ListThreads()
 ```
 
 ## Supported backends

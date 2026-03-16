@@ -61,6 +61,12 @@ type StreamEvent struct {
 	Error    string `json:"error,omitempty"`
 }
 
+// Client is an embeddable oneagent runtime with configurable backends and thread store.
+type Client struct {
+	Backends map[string]Backend
+	Store    Store
+}
+
 // RunOpts configures a single agent invocation.
 type RunOpts struct {
 	Backend   string
@@ -170,18 +176,28 @@ func buildCmd(b Backend, opts RunOpts) (*exec.Cmd, error) {
 
 // Run executes a prompt against the specified backend and returns a normalized response.
 func Run(backends map[string]Backend, opts RunOpts) Response {
-	return run(backends, opts, nil)
+	return Client{Backends: backends}.Run(opts)
 }
 
 // RunStream executes a prompt and emits normalized streaming events as they arrive.
 func RunStream(backends map[string]Backend, opts RunOpts, emit func(StreamEvent)) Response {
-	resp := run(backends, opts, emit)
+	return Client{Backends: backends}.RunStream(opts, emit)
+}
+
+// Run executes a prompt against the configured backends and returns a normalized response.
+func (c Client) Run(opts RunOpts) Response {
+	return c.run(opts, nil)
+}
+
+// RunStream executes a prompt and emits normalized streaming events as they arrive.
+func (c Client) RunStream(opts RunOpts, emit func(StreamEvent)) Response {
+	resp := c.run(opts, emit)
 	emitFinal(emit, finalEvent(resp))
 	return resp
 }
 
-func run(backends map[string]Backend, opts RunOpts, emit func(StreamEvent)) Response {
-	b, ok := backends[opts.Backend]
+func (c Client) run(opts RunOpts, emit func(StreamEvent)) Response {
+	b, ok := c.Backends[opts.Backend]
 	if !ok {
 		return Response{Error: "backend not configured: " + opts.Backend, Backend: opts.Backend}
 	}

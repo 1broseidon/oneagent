@@ -11,6 +11,8 @@ backends, err := oneagent.LoadBackends("")
 if err != nil {
 	log.Fatal(err)
 }
+
+client := oneagent.Client{Backends: backends}
 ```
 
 Use an explicit config file instead:
@@ -27,7 +29,7 @@ if err != nil {
 For a single final response:
 
 ```go
-resp := oneagent.Run(backends, oneagent.RunOpts{
+resp := client.Run(oneagent.RunOpts{
 	Backend: "claude",
 	Prompt:  "explain this codebase",
 	CWD:     "/path/to/project",
@@ -58,7 +60,7 @@ type Response struct {
 Use `RunStream` when you want incremental updates:
 
 ```go
-resp := oneagent.RunStream(backends, oneagent.RunOpts{
+resp := client.RunStream(oneagent.RunOpts{
 	Backend: "claude",
 	Prompt:  "review the repo",
 	CWD:     "/path/to/project",
@@ -95,7 +97,7 @@ The normalized event model is intentionally small:
 Use `RunWithThread` or `RunWithThreadStream` to let `oneagent` own the conversation history:
 
 ```go
-resp := oneagent.RunWithThread(backends, oneagent.RunOpts{
+resp := client.RunWithThread(oneagent.RunOpts{
 	Backend:  "codex",
 	ThreadID: "auth-fix",
 	Prompt:   "continue debugging",
@@ -112,10 +114,24 @@ This gives you:
 Thread helpers:
 
 ```go
-ids, err := oneagent.ListThreads()
-thread, err := oneagent.LoadThread("auth-fix")
-err = oneagent.CompactThread(backends, "auth-fix", "claude")
+ids, err := client.ListThreads()
+thread, err := client.LoadThread("auth-fix")
+err = client.CompactThread("auth-fix", "claude")
 ```
+
+## Custom Thread Storage
+
+Consumers that need isolated thread state can inject a store:
+
+```go
+store := oneagent.FilesystemStore{Dir: "/tmp/my-app-threads"}
+client := oneagent.Client{
+	Backends: backends,
+	Store:    store,
+}
+```
+
+Package-level helpers still use the default filesystem-backed store for backward compatibility.
 
 ## Consumer Pattern
 

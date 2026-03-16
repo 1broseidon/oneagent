@@ -25,15 +25,44 @@ type Thread struct {
 	NativeSessions map[string]string `json:"native_sessions,omitempty"`
 }
 
+// Store persists portable thread state for a Client.
+type Store interface {
+	LoadThread(id string) (*Thread, error)
+	SaveThread(thread *Thread) error
+	ListThreads() ([]string, error)
+}
+
+// FilesystemStore stores thread JSON files in a directory on disk.
+type FilesystemStore struct {
+	Dir string
+}
+
 // ThreadDir returns the directory for thread storage.
 func ThreadDir() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".local", "state", "oneagent", "threads")
 }
 
+func (s FilesystemStore) dir() string {
+	if s.Dir != "" {
+		return s.Dir
+	}
+	return ThreadDir()
+}
+
 // LoadThread reads a thread from disk. A missing file returns an empty thread.
 func LoadThread(id string) (*Thread, error) {
-	path := filepath.Join(ThreadDir(), id+".json")
+	return FilesystemStore{}.LoadThread(id)
+}
+
+// LoadThread reads a thread from the configured store. A missing thread returns an empty thread.
+func (c Client) LoadThread(id string) (*Thread, error) {
+	return c.threadStore().LoadThread(id)
+}
+
+// LoadThread reads a thread from the filesystem store. A missing file returns an empty thread.
+func (s FilesystemStore) LoadThread(id string) (*Thread, error) {
+	path := filepath.Join(s.dir(), id+".json")
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return &Thread{ID: id, NativeSessions: map[string]string{}}, nil
@@ -53,7 +82,17 @@ func LoadThread(id string) (*Thread, error) {
 
 // Save writes the thread to disk, creating the directory if needed.
 func (t *Thread) Save() error {
-	dir := ThreadDir()
+	return FilesystemStore{}.SaveThread(t)
+}
+
+// SaveThread writes the thread to the configured store.
+func (c Client) SaveThread(t *Thread) error {
+	return c.threadStore().SaveThread(t)
+}
+
+// SaveThread writes the thread to disk, creating the directory if needed.
+func (s FilesystemStore) SaveThread(t *Thread) error {
+	dir := s.dir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -149,33 +188,43 @@ func (t *Thread) recordTurns(original string, resp Response) {
 
 // RunWithThread wraps Run with thread load/save and context injection.
 func RunWithThread(backends map[string]Backend, opts RunOpts) Response {
-	return runWithThread(backends, opts, nil)
+	return Client{Backends: backends}.RunWithThread(opts)
 }
 
 // RunWithThreadStream wraps RunStream with thread load/save and context injection.
 func RunWithThreadStream(backends map[string]Backend, opts RunOpts, emit func(StreamEvent)) Response {
-	resp := runWithThread(backends, opts, emit)
+	return Client{Backends: backends}.RunWithThreadStream(opts, emit)
+}
+
+// RunWithThread wraps Run with thread load/save and context injection.
+func (c Client) RunWithThread(opts RunOpts) Response {
+	return c.runWithThread(opts, nil)
+}
+
+// RunWithThreadStream wraps RunStream with thread load/save and context injection.
+func (c Client) RunWithThreadStream(opts RunOpts, emit func(StreamEvent)) Response {
+	resp := c.runWithThread(opts, emit)
 	emitFinal(emit, finalEvent(resp))
 	return resp
 }
 
-func runWithThread(backends map[string]Backend, opts RunOpts, emit func(StreamEvent)) Response {
+func (c Client) runWithThread(opts RunOpts, emit func(StreamEvent)) Response {
 	if opts.ThreadID == "" {
-		return run(backends, opts, emit)
+		return c.run(opts, emit)
 	}
 
-	thread, err := LoadThread(opts.ThreadID)
+	thread, err := c.threadStore().LoadThread(opts.ThreadID)
 	if err != nil {
 		return Response{Error: err.Error(), Backend: opts.Backend, ThreadID: opts.ThreadID}
 	}
 
 	original := prepareThreadPrompt(thread, &opts)
 	var streamSaveErr error
-	resp := run(backends, opts, func(event StreamEvent) {
+	resp := c.run(opts, func(event StreamEvent) {
 		event.ThreadID = opts.ThreadID
 		if event.Type == "session" && event.Session != "" {
 			thread.NativeSessions[opts.Backend] = event.Session
-			if err := thread.Save(); err != nil && streamSaveErr == nil {
+			if err := c.threadStore().SaveThread(thread); err != nil && streamSaveErr == nil {
 				streamSaveErr = err
 			}
 		}
@@ -186,7 +235,7 @@ func runWithThread(backends map[string]Backend, opts RunOpts, emit func(StreamEv
 	}
 
 	thread.recordTurns(original, resp)
-	if err := thread.Save(); err != nil {
+	if err := c.threadStore().SaveThread(thread); err != nil {
 		resp.Error = "thread save failed: " + err.Error()
 	}
 	resp.ThreadID = opts.ThreadID
@@ -195,7 +244,12 @@ func runWithThread(backends map[string]Backend, opts RunOpts, emit func(StreamEv
 
 // CompactThread summarizes old turns using a backend, keeping the last keepTurns.
 func CompactThread(backends map[string]Backend, threadID, backend string) error {
-	thread, err := LoadThread(threadID)
+	return Client{Backends: backends}.CompactThread(threadID, backend)
+}
+
+// CompactThread summarizes old turns using a backend, keeping the last keepTurns.
+func (c Client) CompactThread(threadID, backend string) error {
+	thread, err := c.threadStore().LoadThread(threadID)
 	if err != nil {
 		return err
 	}
@@ -217,19 +271,29 @@ func CompactThread(backends map[string]Backend, threadID, backend string) error 
 	text := strings.Join(lines, "\n")
 
 	prompt := "Summarize this conversation concisely, preserving key decisions and context:\n\n" + text
-	resp := Run(backends, RunOpts{Backend: backend, Prompt: prompt})
+	resp := c.Run(RunOpts{Backend: backend, Prompt: prompt})
 	if resp.Error != "" {
 		return fmt.Errorf("compaction failed: %s", resp.Error)
 	}
 
 	thread.Summary = resp.Result
 	thread.Turns = thread.Turns[len(thread.Turns)-keepTurns:]
-	return thread.Save()
+	return c.threadStore().SaveThread(thread)
 }
 
 // ListThreads returns the IDs of all saved threads.
 func ListThreads() ([]string, error) {
-	entries, err := os.ReadDir(ThreadDir())
+	return FilesystemStore{}.ListThreads()
+}
+
+// ListThreads returns the IDs of all saved threads from the configured store.
+func (c Client) ListThreads() ([]string, error) {
+	return c.threadStore().ListThreads()
+}
+
+// ListThreads returns the IDs of all saved threads from the filesystem store.
+func (s FilesystemStore) ListThreads() ([]string, error) {
+	entries, err := os.ReadDir(s.dir())
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -243,4 +307,11 @@ func ListThreads() ([]string, error) {
 		}
 	}
 	return ids, nil
+}
+
+func (c Client) threadStore() Store {
+	if c.Store != nil {
+		return c.Store
+	}
+	return FilesystemStore{}
 }

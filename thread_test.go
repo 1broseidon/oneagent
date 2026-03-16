@@ -35,6 +35,43 @@ func setupThreadHome(t *testing.T) {
 	t.Setenv("HOME", home)
 }
 
+type memoryStore struct {
+	threads map[string]*Thread
+}
+
+func newMemoryStore() *memoryStore {
+	return &memoryStore{threads: map[string]*Thread{}}
+}
+
+func (s *memoryStore) LoadThread(id string) (*Thread, error) {
+	if thread, ok := s.threads[id]; ok {
+		data, _ := json.Marshal(thread)
+		var clone Thread
+		json.Unmarshal(data, &clone)
+		if clone.NativeSessions == nil {
+			clone.NativeSessions = map[string]string{}
+		}
+		return &clone, nil
+	}
+	return &Thread{ID: id, NativeSessions: map[string]string{}}, nil
+}
+
+func (s *memoryStore) SaveThread(thread *Thread) error {
+	data, _ := json.Marshal(thread)
+	var clone Thread
+	json.Unmarshal(data, &clone)
+	s.threads[thread.ID] = &clone
+	return nil
+}
+
+func (s *memoryStore) ListThreads() ([]string, error) {
+	ids := make([]string, 0, len(s.threads))
+	for id := range s.threads {
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
 func TestNewThreadCreatesFileAndRecordsTurns(t *testing.T) {
 	setupThreadHome(t)
 
@@ -66,6 +103,56 @@ func TestNewThreadCreatesFileAndRecordsTurns(t *testing.T) {
 	}
 	if thread.Turns[1].Role != "assistant" {
 		t.Fatalf("turn[1].role = %q, want assistant", thread.Turns[1].Role)
+	}
+}
+
+func TestFilesystemStoreUsesCustomDir(t *testing.T) {
+	store := FilesystemStore{Dir: t.TempDir()}
+	client := Client{
+		Backends: map[string]Backend{"a": staticBackend("ok", "sa")},
+		Store:    store,
+	}
+
+	resp := client.RunWithThread(RunOpts{Backend: "a", Prompt: "first", ThreadID: "custom"})
+	if resp.Error != "" {
+		t.Fatalf("unexpected error: %s", resp.Error)
+	}
+
+	path := filepath.Join(store.Dir, "custom.json")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("thread file not created in custom dir: %v", err)
+	}
+}
+
+func TestClientUsesCustomInMemoryStore(t *testing.T) {
+	store := newMemoryStore()
+	client := Client{
+		Backends: map[string]Backend{"a": staticBackend("ok", "sa")},
+		Store:    store,
+	}
+
+	resp := client.RunWithThread(RunOpts{Backend: "a", Prompt: "first", ThreadID: "mem"})
+	if resp.ThreadID != "mem" {
+		t.Fatalf("thread_id = %q, want mem", resp.ThreadID)
+	}
+	if resp.Error != "" {
+		t.Fatalf("unexpected error: %s", resp.Error)
+	}
+
+	thread, err := client.LoadThread("mem")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(thread.Turns) != 2 {
+		t.Fatalf("turns = %d, want 2", len(thread.Turns))
+	}
+
+	ids, err := client.ListThreads()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != "mem" {
+		t.Fatalf("ids = %v, want [mem]", ids)
 	}
 }
 
