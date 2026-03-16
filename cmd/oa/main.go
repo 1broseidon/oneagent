@@ -14,6 +14,8 @@ type cliOpts struct {
 	model      string
 	cwd        string
 	session    string
+	json       bool
+	text       bool
 	stream     bool
 	thread     string
 	configPath string
@@ -31,6 +33,14 @@ func parseArgs(args []string) cliOpts {
 		"-c": &o.configPath, "--config": &o.configPath,
 	}
 	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--json":
+			o.json = true
+			continue
+		case "--text":
+			o.text = true
+			continue
+		}
 		if args[i] == "--stream" {
 			o.stream = true
 			continue
@@ -73,16 +83,27 @@ func main() {
 }
 
 func runPrompt(o cliOpts) {
+	validateRunPrompt(o)
+	backends, opts := loadRunContext(o)
+	dispatchPrompt(backends, opts, o)
+}
+
+func validateRunPrompt(o cliOpts) {
 	if len(o.prompt) == 0 {
 		fmt.Fprintln(os.Stderr, "error: no prompt provided")
 		os.Exit(1)
 	}
-
 	if o.thread != "" && o.session != "" {
 		fmt.Fprintln(os.Stderr, "error: --thread and --session are mutually exclusive")
 		os.Exit(1)
 	}
+	if o.text && o.json {
+		fmt.Fprintln(os.Stderr, "error: --text and --json are mutually exclusive")
+		os.Exit(1)
+	}
+}
 
+func loadRunContext(o cliOpts) (map[string]oneagent.Backend, oneagent.RunOpts) {
 	backends, err := oneagent.LoadBackends(o.configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -102,31 +123,42 @@ func runPrompt(o cliOpts) {
 		SessionID: o.session,
 		ThreadID:  o.thread,
 	}
+	return backends, opts
+}
 
+func dispatchPrompt(backends map[string]oneagent.Backend, opts oneagent.RunOpts, o cliOpts) {
 	if o.stream {
-		streamPrompt(backends, opts)
+		streamPrompt(backends, opts, o.json)
 		return
 	}
 
-	var resp oneagent.Response
-	if o.thread != "" {
-		resp = oneagent.RunWithThread(backends, opts)
-	} else {
-		resp = oneagent.Run(backends, opts)
+	resp := runOnce(backends, opts)
+	if o.json {
+		writeJSONResponse(resp)
+		return
 	}
-
-	out, _ := json.MarshalIndent(resp, "", "  ")
-	fmt.Println(string(out))
-
-	if resp.Error != "" {
-		os.Exit(1)
-	}
+	writeTextResponse(resp)
 }
 
-func streamPrompt(backends map[string]oneagent.Backend, opts oneagent.RunOpts) {
+func runOnce(backends map[string]oneagent.Backend, opts oneagent.RunOpts) oneagent.Response {
+	if opts.ThreadID != "" {
+		return oneagent.RunWithThread(backends, opts)
+	}
+	return oneagent.Run(backends, opts)
+}
+
+func streamPrompt(backends map[string]oneagent.Backend, opts oneagent.RunOpts, jsonOutput bool) {
 	emit := func(event oneagent.StreamEvent) {
+		if !jsonOutput {
+			return
+		}
 		out, _ := json.Marshal(event)
 		fmt.Println(string(out))
+	}
+
+	writer := textStreamWriter{}
+	if !jsonOutput {
+		emit = writer.Emit
 	}
 
 	var resp oneagent.Response
@@ -136,9 +168,64 @@ func streamPrompt(backends map[string]oneagent.Backend, opts oneagent.RunOpts) {
 		resp = oneagent.RunStream(backends, opts, emit)
 	}
 
+	if !jsonOutput {
+		writer.Finish(resp)
+		return
+	}
 	if resp.Error != "" {
 		os.Exit(1)
 	}
+}
+
+type textStreamWriter struct {
+	wroteDelta       bool
+	endedWithNewline bool
+}
+
+func (w *textStreamWriter) Emit(event oneagent.StreamEvent) {
+	switch event.Type {
+	case "activity":
+		if event.Activity != "" {
+			fmt.Fprintf(os.Stderr, "[activity] %s\n", event.Activity)
+		}
+	case "delta":
+		fmt.Print(event.Delta)
+		w.wroteDelta = true
+		w.endedWithNewline = strings.HasSuffix(event.Delta, "\n")
+	}
+}
+
+func (w *textStreamWriter) Finish(resp oneagent.Response) {
+	if resp.Error != "" {
+		if w.wroteDelta && !w.endedWithNewline {
+			fmt.Fprintln(os.Stderr)
+		}
+		fmt.Fprintln(os.Stderr, resp.Error)
+		os.Exit(1)
+	}
+	if !w.wroteDelta {
+		fmt.Println(resp.Result)
+		return
+	}
+	if !w.endedWithNewline {
+		fmt.Println()
+	}
+}
+
+func writeJSONResponse(resp oneagent.Response) {
+	out, _ := json.MarshalIndent(resp, "", "  ")
+	fmt.Println(string(out))
+	if resp.Error != "" {
+		os.Exit(1)
+	}
+}
+
+func writeTextResponse(resp oneagent.Response) {
+	if resp.Error != "" {
+		fmt.Fprintln(os.Stderr, resp.Error)
+		os.Exit(1)
+	}
+	fmt.Println(resp.Result)
 }
 
 func threadCmd(args []string, configPath string) {
@@ -265,14 +352,18 @@ Flags:
   -b, --backend <name>           Backend to use (default: claude)
   -m, --model <model>            Model override
   -C, --cwd <dir>                Working directory
+  --json                         Emit machine-readable JSON output
   -s, --session <id>             Resume session (mutually exclusive with -t)
+  --text                         Emit plain text output (default)
   --stream                       Emit normalized JSONL events while running
   -t, --thread <id>              Start or continue a thread
   -c, --config <path>            Use only this config file
 
 Output:
-  Default: JSON with result, session, thread_id, backend, and error fields.
-  --stream: JSONL events with session, activity, delta, and final done/error records.
+  Default: plain text result for humans.
+  --json: final JSON with result, session, thread_id, backend, and error fields.
+  --stream: live text with activity lines and streamed assistant text.
+  --stream --json: normalized JSONL events with session, activity, delta, and final done/error records.
 Config:
   Built-in defaults: claude, codex, opencode, pi.
   ~/.config/oneagent/backends.json adds or replaces backends.

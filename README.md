@@ -2,7 +2,7 @@
 
 One interface for every AI coding agent. Config-driven, zero code changes to add new backends.
 
-`oa` wraps any agent CLI (Claude, Codex, Cursor, OpenCode, Cline, Pi, ...) behind a unified JSON interface. Define backends in a config file with command templates, output parsing rules, and session support. Add new agents by editing a JSON file — no code required.
+`oa` wraps any agent CLI (Claude, Codex, Cursor, OpenCode, Cline, Pi, ...) behind one interface. The CLI defaults to human-friendly text output, with `--json` for final machine-readable output and `--stream --json` for normalized JSONL events. Define backends in a config file with command templates, output parsing rules, and session support. Add new agents by editing a JSON file — no code required.
 
 ## Install
 
@@ -16,8 +16,17 @@ go install github.com/1broseidon/oneagent/cmd/oa@latest
 # Talk to Claude
 oa "explain this codebase"
 
+# Machine-readable final JSON
+oa --json "explain this codebase"
+
 # Use a different backend
 oa -b codex "fix the auth bug"
+
+# Live text stream
+oa --stream "review the repo"
+
+# Normalized JSONL stream
+oa --stream --json "review the repo"
 
 # Start or continue a portable thread
 oa -t auth-fix "investigate the failing auth tests"
@@ -43,7 +52,13 @@ Built-in defaults ship for `claude`, `codex`, `opencode`, and `pi`, so `oa` work
 
 ## Output
 
-Every invocation returns normalized JSON:
+By default, `oa` prints plain text:
+
+```text
+Here's what I found...
+```
+
+With `--json`, every invocation returns normalized JSON:
 
 ```json
 {
@@ -54,7 +69,7 @@ Every invocation returns normalized JSON:
 }
 ```
 
-On error:
+On error with `--json`:
 
 ```json
 {
@@ -66,7 +81,14 @@ On error:
 }
 ```
 
-With `--stream`, output is normalized JSONL:
+With `--stream`, `oa` prints a human-friendly live stream:
+
+```text
+[activity] Read README.md
+OK
+```
+
+With `--stream --json`, output is normalized JSONL:
 
 ```json
 {"type":"session","backend":"claude","session":"abc123-def456"}

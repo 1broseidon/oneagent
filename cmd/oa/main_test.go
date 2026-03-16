@@ -126,7 +126,77 @@ func TestListHonorsExplicitConfigPath(t *testing.T) {
 	}
 }
 
-func TestStreamOutputsNormalizedJSONL(t *testing.T) {
+func TestDefaultPromptOutputsText(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	scriptPath := filepath.Join(home, "resp.sh")
+	script := "#!/bin/sh\n" +
+		"printf '%s\n' '{\"result\":\"hello\",\"session\":\"sess-1\"}'\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	configPath := filepath.Join(home, "backends.json")
+	configJSON := []byte(`{
+		"s": {
+			"run": "` + scriptPath + `",
+			"format": "json",
+			"result": "result",
+			"session": "session"
+		}
+	}`)
+	if err := os.WriteFile(configPath, configJSON, 0o644); err != nil {
+		t.Fatalf("write backends: %v", err)
+	}
+
+	cmd := exec.Command("go", "run", ".", "-b", "s", "-c", configPath, "hi")
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("oa default text output should succeed, got err=%v output=%s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); got != "hello" {
+		t.Fatalf("oa default output = %q, want %q", got, "hello")
+	}
+}
+
+func TestJSONFlagOutputsJSON(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	scriptPath := filepath.Join(home, "resp.sh")
+	script := "#!/bin/sh\n" +
+		"printf '%s\n' '{\"result\":\"hello\",\"session\":\"sess-1\"}'\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	configPath := filepath.Join(home, "backends.json")
+	configJSON := []byte(`{
+		"s": {
+			"run": "` + scriptPath + `",
+			"format": "json",
+			"result": "result",
+			"session": "session"
+		}
+	}`)
+	if err := os.WriteFile(configPath, configJSON, 0o644); err != nil {
+		t.Fatalf("write backends: %v", err)
+	}
+
+	cmd := exec.Command("go", "run", ".", "--json", "-b", "s", "-c", configPath, "hi")
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("oa --json should succeed, got err=%v output=%s", err, out)
+	}
+	if !strings.Contains(string(out), `"result": "hello"`) {
+		t.Fatalf("oa --json output missing result:\n%s", out)
+	}
+}
+
+func TestStreamOutputsTextByDefault(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
@@ -161,7 +231,54 @@ func TestStreamOutputsNormalizedJSONL(t *testing.T) {
 	cmd.Dir = "."
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("oa --stream should succeed, got err=%v output=%s", err, out)
+		t.Fatalf("oa --stream text should succeed, got err=%v output=%s", err, out)
+	}
+
+	text := string(out)
+	if !strings.Contains(text, "[activity] Read README.md") {
+		t.Fatalf("stream text output missing activity line:\n%s", text)
+	}
+	if !strings.Contains(text, "hello") {
+		t.Fatalf("stream text output missing assistant text:\n%s", text)
+	}
+}
+
+func TestStreamOutputsNormalizedJSONL(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	scriptPath := filepath.Join(home, "stream.sh")
+	script := "#!/bin/sh\n" +
+		"printf '%s\n' '{\"type\":\"session\",\"sid\":\"sess-1\"}'\n" +
+		"printf '%s\n' '{\"type\":\"activity\",\"tool\":{\"name\":\"Read\",\"path\":\"README.md\"}}'\n" +
+		"printf '%s\n' '{\"type\":\"delta\",\"data\":{\"text\":\"hello\"}}'\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	configPath := filepath.Join(home, "backends.json")
+	configJSON := []byte(`{
+		"s": {
+			"run": "` + scriptPath + `",
+			"format": "jsonl",
+			"activity": "{tool.name} {tool.path}",
+			"activity_when": "type=activity",
+			"result": "data.text",
+			"result_when": "type=delta",
+			"result_append": true,
+			"session": "sid",
+			"session_when": "type=session"
+		}
+	}`)
+	if err := os.WriteFile(configPath, configJSON, 0o644); err != nil {
+		t.Fatalf("write backends: %v", err)
+	}
+
+	cmd := exec.Command("go", "run", ".", "--stream", "--json", "-b", "s", "-c", configPath, "hi")
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("oa --stream --json should succeed, got err=%v output=%s", err, out)
 	}
 
 	text := string(out)
