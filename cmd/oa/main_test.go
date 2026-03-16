@@ -133,6 +133,7 @@ func TestStreamOutputsNormalizedJSONL(t *testing.T) {
 	scriptPath := filepath.Join(home, "stream.sh")
 	script := "#!/bin/sh\n" +
 		"printf '%s\n' '{\"type\":\"session\",\"sid\":\"sess-1\"}'\n" +
+		"printf '%s\n' '{\"type\":\"activity\",\"tool\":{\"name\":\"Read\",\"path\":\"README.md\"}}'\n" +
 		"printf '%s\n' '{\"type\":\"delta\",\"data\":{\"text\":\"hello\"}}'\n"
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write script: %v", err)
@@ -143,6 +144,8 @@ func TestStreamOutputsNormalizedJSONL(t *testing.T) {
 		"s": {
 			"run": "` + scriptPath + `",
 			"format": "jsonl",
+			"activity": "{tool.name} {tool.path}",
+			"activity_when": "type=activity",
 			"result": "data.text",
 			"result_when": "type=delta",
 			"result_append": true,
@@ -164,6 +167,9 @@ func TestStreamOutputsNormalizedJSONL(t *testing.T) {
 	text := string(out)
 	if !strings.Contains(text, `"type":"session"`) {
 		t.Fatalf("stream output missing session event:\n%s", text)
+	}
+	if !strings.Contains(text, `"type":"activity"`) {
+		t.Fatalf("stream output missing activity event:\n%s", text)
 	}
 	if !strings.Contains(text, `"type":"delta"`) {
 		t.Fatalf("stream output missing delta event:\n%s", text)

@@ -26,6 +26,10 @@ type Backend struct {
 	ResumeCmd    []string
 	SystemPrompt string
 	Format       string // "json" or "jsonl"
+	Activity     string
+	ActivityWhen string
+	Delta        string
+	DeltaWhen    string
 	Result       string
 	ResultWhen   string
 	ResultAppend bool
@@ -51,6 +55,7 @@ type StreamEvent struct {
 	Backend  string `json:"backend"`
 	ThreadID string `json:"thread_id,omitempty"`
 	Session  string `json:"session,omitempty"`
+	Activity string `json:"activity,omitempty"`
 	Delta    string `json:"delta,omitempty"`
 	Result   string `json:"result,omitempty"`
 	Error    string `json:"error,omitempty"`
@@ -306,30 +311,55 @@ func extractField(line map[string]any, when, field string) string {
 }
 
 func scanJSONL(scanner *bufio.Scanner, b Backend, backend string, emit func(StreamEvent)) (result, session, lastErr string) {
+	deltaField := b.Delta
+	deltaWhen := b.DeltaWhen
+	if deltaField == "" {
+		deltaField = b.Result
+		deltaWhen = b.ResultWhen
+	}
+
 	for scanner.Scan() {
 		var line map[string]any
 		if err := json.Unmarshal(scanner.Bytes(), &line); err != nil {
 			continue
 		}
-		if v := extractField(line, b.ErrorWhen, b.Error); v != "" {
-			lastErr = v
-		}
-		if v := extractField(line, b.SessionWhen, b.Session); v != "" {
-			if v != session {
-				session = v
-				emitEvent(emit, StreamEvent{Type: "session", Backend: backend, Session: session})
-			}
-		}
-		if v := extractField(line, b.ResultWhen, b.Result); v != "" {
-			if b.ResultAppend {
-				result += v
-			} else {
-				result = v
-			}
-			emitEvent(emit, StreamEvent{Type: "delta", Backend: backend, Session: session, Delta: v})
-		}
+		processJSONLLine(line, b, backend, emit, deltaField, deltaWhen, &result, &session, &lastErr)
 	}
 	return
+}
+
+func processJSONLLine(line map[string]any, b Backend, backend string, emit func(StreamEvent), deltaField, deltaWhen string, result, session, lastErr *string) {
+	if v := extractField(line, b.ErrorWhen, b.Error); v != "" {
+		*lastErr = v
+	}
+	if v := extractField(line, b.SessionWhen, b.Session); v != "" {
+		emitSession(emit, backend, session, v)
+	}
+	if v := extractField(line, b.ResultWhen, b.Result); v != "" {
+		appendResult(result, v, b.ResultAppend)
+	}
+	if v := extractTemplate(line, b.ActivityWhen, b.Activity); v != "" {
+		emitEvent(emit, StreamEvent{Type: "activity", Backend: backend, Session: *session, Activity: v})
+	}
+	if v := extractField(line, deltaWhen, deltaField); v != "" {
+		emitEvent(emit, StreamEvent{Type: "delta", Backend: backend, Session: *session, Delta: v})
+	}
+}
+
+func emitSession(emit func(StreamEvent), backend string, current *string, next string) {
+	if next == *current {
+		return
+	}
+	*current = next
+	emitEvent(emit, StreamEvent{Type: "session", Backend: backend, Session: next})
+}
+
+func appendResult(result *string, next string, appendMode bool) {
+	if appendMode {
+		*result += next
+		return
+	}
+	*result = next
 }
 
 // jsonGet walks a dot-separated path into a map.
@@ -337,11 +367,19 @@ func jsonGet(m map[string]any, path string) any {
 	parts := strings.Split(path, ".")
 	var cur any = m
 	for _, p := range parts {
-		obj, ok := cur.(map[string]any)
-		if !ok {
-			return nil
+		if obj, ok := cur.(map[string]any); ok {
+			cur = obj[p]
+			continue
 		}
-		cur = obj[p]
+		if arr, ok := cur.([]any); ok {
+			var idx int
+			if _, err := fmt.Sscanf(p, "%d", &idx); err != nil || idx < 0 || idx >= len(arr) {
+				return nil
+			}
+			cur = arr[idx]
+			continue
+		}
+		return nil
 	}
 	return cur
 }
@@ -369,6 +407,37 @@ func stringifyValue(v any) string {
 	default:
 		return fmt.Sprint(x)
 	}
+}
+
+func extractTemplate(line map[string]any, when, tmpl string) string {
+	if tmpl == "" || when == "" || !matchWhen(line, when) {
+		return ""
+	}
+	if !strings.Contains(tmpl, "{") {
+		return strings.TrimSpace(stringifyValue(jsonGet(line, tmpl)))
+	}
+
+	var out strings.Builder
+	rest := tmpl
+	for {
+		open := strings.IndexByte(rest, '{')
+		if open < 0 {
+			out.WriteString(rest)
+			break
+		}
+		out.WriteString(rest[:open])
+		rest = rest[open+1:]
+
+		close := strings.IndexByte(rest, '}')
+		if close < 0 {
+			out.WriteByte('{')
+			out.WriteString(rest)
+			break
+		}
+		out.WriteString(stringifyValue(jsonGet(line, rest[:close])))
+		rest = rest[close+1:]
+	}
+	return strings.Join(strings.Fields(out.String()), " ")
 }
 
 func finalEvent(resp Response) StreamEvent {

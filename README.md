@@ -70,9 +70,12 @@ With `--stream`, output is normalized JSONL:
 
 ```json
 {"type":"session","backend":"claude","session":"abc123-def456"}
+{"type":"activity","backend":"claude","session":"abc123-def456","activity":"Read README.md"}
 {"type":"delta","backend":"claude","session":"abc123-def456","delta":"OK"}
 {"type":"done","backend":"claude","session":"abc123-def456","result":"OK"}
 ```
+
+The normalized stream shape is intentionally small: `session`, optional `activity`, optional `delta`, then final `done` or `error`.
 
 ## Portable threads
 
@@ -112,9 +115,12 @@ Example override file:
     "resume": "+ --resume {session}",
     "system": "You are a helpful assistant.",
     "format": "jsonl",
-    "result": "event.delta.text",
-    "result_when": "type=stream_event&event.type=content_block_delta&event.delta.type=text_delta",
-    "result_append": true,
+    "activity": "{message.content.0.name} {message.content.0.input.file_path}",
+    "activity_when": "type=assistant&message.content.0.type=tool_use",
+    "delta": "event.delta.text",
+    "delta_when": "type=stream_event&event.type=content_block_delta&event.delta.type=text_delta",
+    "result": "result",
+    "result_when": "type=result&is_error=false",
     "session": "session_id",
     "session_when": "type=system",
     "error": "result",
@@ -125,6 +131,10 @@ Example override file:
     "run": "codex exec {prompt} --json --full-auto -C {cwd}",
     "resume": "codex exec resume {session} {prompt} --json --full-auto",
     "format": "jsonl",
+    "activity": "{item.command}",
+    "activity_when": "type=item.started&item.type=command_execution",
+    "delta": "assistantMessageEvent.delta",
+    "delta_when": "type=message_update&assistantMessageEvent.type=text_delta",
     "result": "item.text",
     "result_when": "type=item.completed",
     "session": "thread_id",
@@ -143,6 +153,10 @@ Example override file:
 | `resume` | no | Resume command as a full string, or a patch like `+ --resume {session}` inserted after `{prompt}` |
 | `system` | no | Prepended to prompt on first message (no active session) |
 | `format` | yes | Output format: `json` (single object) or `jsonl` (line-delimited events) |
+| `activity` | no | Dot-path or template for a generic pre-final activity message |
+| `activity_when` | no | Match condition for activity events |
+| `delta` | no | Dot-path to a streaming text chunk for `--stream` |
+| `delta_when` | no | Match condition for streaming delta events |
 | `result` | yes | Dot-path to result text (e.g. `result`, `item.text`, `assistantMessageEvent.delta`) |
 | `result_when` | no | Match condition for jsonl (e.g. `type=item.completed`). Supports `&` for AND |
 | `result_append` | no | If `true`, accumulate result across multiple matching events (for streaming deltas) |
@@ -162,12 +176,14 @@ When a variable resolves to empty, both the variable and its preceding flag are 
 
 ### Match conditions
 
-`result_when`, `session_when`, and `error_when` use `key=value` syntax with dot-paths:
+`activity_when`, `delta_when`, `result_when`, `session_when`, and `error_when` use `key=value` syntax with dot-paths:
 
 ```
 type=item.completed                     # single condition
 type=message_update&assistantMessageEvent.type=text_delta   # AND conditions
 ```
+
+Activity templates can interpolate dot-paths with `{...}` placeholders. Numeric path segments index arrays, so `{message.content.0.name}` is valid.
 
 ## Use as a library
 
@@ -184,6 +200,18 @@ resp := oneagent.Run(backends, oneagent.RunOpts{
 
 fmt.Println(resp.Result)
 fmt.Println(resp.Session) // for resume
+```
+
+Streaming from Go:
+
+```go
+oneagent.RunStream(backends, oneagent.RunOpts{
+    Backend: "claude",
+    Prompt:  "review the repo",
+    CWD:     "/path/to/project",
+}, func(event oneagent.StreamEvent) {
+    fmt.Println(event.Type, event.Activity, event.Delta, event.Result)
+})
 ```
 
 Portable threads from Go:

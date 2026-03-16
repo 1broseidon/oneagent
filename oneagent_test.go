@@ -98,6 +98,124 @@ func TestRunStreamEmitsNormalizedEvents(t *testing.T) {
 	}
 }
 
+func TestRunStreamEmitsActivityEvents(t *testing.T) {
+	events := `{"type":"session","sid":"sess-42"}
+{"type":"started","tool":{"name":"Read","path":"README.md"}}
+{"type":"delta","data":{"text":"one"}}
+{"type":"done","data":{"text":"onetwo"}}
+`
+	b := Backend{
+		Cmd:          []string{"sh", "-c", "printf '" + events + "'"},
+		Format:       "jsonl",
+		Activity:     "{tool.name} {tool.path}",
+		ActivityWhen: "type=started",
+		Delta:        "data.text",
+		DeltaWhen:    "type=delta",
+		Result:       "data.text",
+		ResultWhen:   "type=done",
+		Session:      "sid",
+		SessionWhen:  "type=session",
+	}
+	backends := map[string]Backend{"jl": b}
+
+	var got []StreamEvent
+	resp := RunStream(backends, RunOpts{Backend: "jl", Prompt: "hi"}, func(event StreamEvent) {
+		got = append(got, event)
+	})
+
+	if resp.Result != "onetwo" {
+		t.Fatalf("result = %q, want %q", resp.Result, "onetwo")
+	}
+
+	want := []StreamEvent{
+		{Type: "session", Backend: "jl", Session: "sess-42"},
+		{Type: "activity", Backend: "jl", Session: "sess-42", Activity: "Read README.md"},
+		{Type: "delta", Backend: "jl", Session: "sess-42", Delta: "one"},
+		{Type: "done", Backend: "jl", Session: "sess-42", Result: "onetwo"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("events = %+v, want %+v", got, want)
+	}
+}
+
+func TestRunStreamUsesDeltaSelectorsWhenConfigured(t *testing.T) {
+	events := `{"type":"session","sid":"sess-42"}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"one"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"two"}}
+{"type":"item.completed","item":{"text":"onetwo"}}
+`
+	b := Backend{
+		Cmd:         []string{"sh", "-c", "printf '" + events + "'"},
+		Format:      "jsonl",
+		Delta:       "assistantMessageEvent.delta",
+		DeltaWhen:   "type=message_update&assistantMessageEvent.type=text_delta",
+		Result:      "item.text",
+		ResultWhen:  "type=item.completed",
+		Session:     "sid",
+		SessionWhen: "type=session",
+	}
+	backends := map[string]Backend{"jl": b}
+
+	var got []StreamEvent
+	resp := RunStream(backends, RunOpts{Backend: "jl", Prompt: "hi"}, func(event StreamEvent) {
+		got = append(got, event)
+	})
+
+	if resp.Result != "onetwo" {
+		t.Fatalf("result = %q, want %q", resp.Result, "onetwo")
+	}
+
+	want := []StreamEvent{
+		{Type: "session", Backend: "jl", Session: "sess-42"},
+		{Type: "delta", Backend: "jl", Session: "sess-42", Delta: "one"},
+		{Type: "delta", Backend: "jl", Session: "sess-42", Delta: "two"},
+		{Type: "done", Backend: "jl", Session: "sess-42", Result: "onetwo"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("events = %+v, want %+v", got, want)
+	}
+}
+
+func TestJSONGetSupportsArrayIndexes(t *testing.T) {
+	line := map[string]any{
+		"message": map[string]any{
+			"content": []any{
+				map[string]any{
+					"name":  "Read",
+					"input": map[string]any{"file_path": "README.md"},
+				},
+			},
+		},
+	}
+
+	if got := jsonGet(line, "message.content.0.name"); got != "Read" {
+		t.Fatalf("jsonGet array access = %v, want Read", got)
+	}
+	if got := jsonGet(line, "message.content.0.input.file_path"); got != "README.md" {
+		t.Fatalf("jsonGet nested array access = %v, want README.md", got)
+	}
+}
+
+func TestExtractTemplateBuildsActivityMessage(t *testing.T) {
+	line := map[string]any{
+		"type": "assistant",
+		"message": map[string]any{
+			"content": []any{
+				map[string]any{
+					"type":  "tool_use",
+					"name":  "Read",
+					"input": map[string]any{"file_path": "README.md"},
+				},
+			},
+		},
+	}
+
+	got := extractTemplate(line, "type=assistant&message.content.0.type=tool_use", "{message.content.0.name} {message.content.0.input.file_path}")
+	if got != "Read README.md" {
+		t.Fatalf("extractTemplate = %q, want %q", got, "Read README.md")
+	}
+}
+
 func TestResultAppendConcatenatesDeltas(t *testing.T) {
 	events := `{"type":"delta","data":{"text":"a"}}
 {"type":"delta","data":{"text":"b"}}

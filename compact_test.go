@@ -156,6 +156,10 @@ func TestCompileAllFieldsPassThrough(t *testing.T) {
 		Resume:       "+ --resume {session}",
 		System:       "sys",
 		Format:       "json",
+		Activity:     "{tool.name}",
+		ActivityWhen: "type=tool",
+		Delta:        "delta",
+		DeltaWhen:    "type=delta",
 		Result:       "result",
 		Session:      "session_id",
 		Model:        "opus",
@@ -169,17 +173,24 @@ func TestCompileAllFieldsPassThrough(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
-	if b.DefaultModel != "opus" {
-		t.Fatalf("model = %q, want opus", b.DefaultModel)
-	}
-	if b.SystemPrompt != "sys" {
-		t.Fatalf("system = %q, want sys", b.SystemPrompt)
-	}
+	assertEqual(t, "model", b.DefaultModel, "opus")
+	assertEqual(t, "system", b.SystemPrompt, "sys")
+	assertEqual(t, "activity", b.Activity, "{tool.name}")
+	assertEqual(t, "activity_when", b.ActivityWhen, "type=tool")
+	assertEqual(t, "delta", b.Delta, "delta")
+	assertEqual(t, "delta_when", b.DeltaWhen, "type=delta")
+	assertEqual(t, "result_when", b.ResultWhen, "type=done")
+	assertEqual(t, "session_when", b.SessionWhen, "type=start")
+	assertEqual(t, "error_when", b.ErrorWhen, "type=error")
 	if !b.ResultAppend {
 		t.Fatal("result_append should be true")
 	}
-	if b.ResultWhen != "type=done" || b.SessionWhen != "type=start" || b.ErrorWhen != "type=error" {
-		t.Fatalf("when conditions not preserved")
+}
+
+func assertEqual(t *testing.T, name, got, want string) {
+	t.Helper()
+	if got != want {
+		t.Fatalf("%s = %q, want %q", name, got, want)
 	}
 }
 

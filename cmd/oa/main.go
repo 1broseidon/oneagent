@@ -272,8 +272,7 @@ Flags:
 
 Output:
   Default: JSON with result, session, thread_id, backend, and error fields.
-  --stream: JSONL events with session, delta, and final done/error records.
-
+  --stream: JSONL events with session, activity, delta, and final done/error records.
 Config:
   Built-in defaults: claude, codex, opencode, pi.
   ~/.config/oneagent/backends.json adds or replaces backends.

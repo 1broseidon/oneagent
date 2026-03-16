@@ -13,6 +13,10 @@ type backendConfig struct {
 	Model        string `json:"model,omitempty"`
 	System       string `json:"system,omitempty"`
 	Format       string `json:"format,omitempty"`
+	Activity     string `json:"activity,omitempty"`
+	ActivityWhen string `json:"activity_when,omitempty"`
+	Delta        string `json:"delta,omitempty"`
+	DeltaWhen    string `json:"delta_when,omitempty"`
 	Result       string `json:"result,omitempty"`
 	ResultWhen   string `json:"result_when,omitempty"`
 	ResultAppend bool   `json:"result_append,omitempty"`
@@ -27,6 +31,10 @@ func compileBackend(c backendConfig) (Backend, error) {
 	b := Backend{
 		SystemPrompt: c.System,
 		Format:       c.Format,
+		Activity:     c.Activity,
+		ActivityWhen: c.ActivityWhen,
+		Delta:        c.Delta,
+		DeltaWhen:    c.DeltaWhen,
 		Result:       c.Result,
 		ResultWhen:   c.ResultWhen,
 		ResultAppend: c.ResultAppend,
