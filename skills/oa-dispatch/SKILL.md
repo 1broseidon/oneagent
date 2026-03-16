@@ -43,13 +43,16 @@ Good prompt:
 ```
 Edit internal/auth/handler.go: Add rate limiting to the Login function.
 Use x/time/rate with a limit of 5 requests per second per IP.
-Do not modify any other functions. Run go test ./internal/auth/... when done.
+Do not modify any other functions. Do not ask for confirmation, just make the edits.
+Run go test ./internal/auth/... when done.
 ```
 
 Bad prompt:
 ```
 Add rate limiting to the auth system
 ```
+
+Always include **"Do not ask for confirmation, just make the edits"** or similar. Without this, some backends may plan or brainstorm instead of making changes, especially if they have skills or settings that encourage a "plan first" workflow.
 
 ## Available backends and models
 
@@ -88,6 +91,8 @@ After the task completes, verify the changes:
 ```bash
 git diff path/to/file.go
 ```
+
+**Parallelism rule:** You can dispatch multiple tasks in parallel if they edit different files. If multiple tasks touch the same file, run them sequentially — otherwise the later task may overwrite or conflict with the earlier one.
 
 ## Using threads for multi-step tasks
 
