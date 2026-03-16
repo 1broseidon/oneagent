@@ -1,10 +1,16 @@
-# Library Guide
+# Go Library Guide
 
-`oneagent` can be embedded directly from Go without shelling out to the `oa` CLI.
+Use `oneagent` as a Go library to run AI agents directly from your application, without the `oa` CLI.
+
+## Install
+
+```sh
+go get github.com/1broseidon/oneagent@latest
+```
 
 ## Loading Backends
 
-Use embedded defaults plus the optional user override file:
+Load the embedded defaults plus any user overrides from `~/.config/oneagent/backends.json`:
 
 ```go
 backends, err := oneagent.LoadBackends("")
@@ -15,7 +21,7 @@ if err != nil {
 client := oneagent.Client{Backends: backends}
 ```
 
-Use an explicit config file instead:
+Or load from an explicit config file instead:
 
 ```go
 backends, err := oneagent.LoadBackends("/path/to/backends.json")
@@ -24,7 +30,7 @@ if err != nil {
 }
 ```
 
-## Final Responses
+## Running a Prompt
 
 For a single final response:
 
@@ -43,21 +49,21 @@ fmt.Println(resp.Result)
 fmt.Println(resp.Session)
 ```
 
-`Response` is normalized across backends:
+Every backend returns the same `Response` shape:
 
 ```go
 type Response struct {
-	Result   string
-	Session  string
-	ThreadID string
-	Backend  string
-	Error    string
+	Result   string // the agent's final answer
+	Session  string // native session ID, for resuming later
+	ThreadID string // portable thread ID, if using threads
+	Backend  string // which backend produced this response
+	Error    string // non-empty on failure
 }
 ```
 
 ## Streaming
 
-Use `RunStream` when you want incremental updates:
+Use `RunStream` to receive incremental updates as the agent works:
 
 ```go
 resp := client.RunStream(oneagent.RunOpts{
@@ -84,17 +90,11 @@ if resp.Error != "" {
 }
 ```
 
-The normalized event model is intentionally small:
-
-- `session`
-- `activity`
-- `delta`
-- `done`
-- `error`
+The event types are intentionally small: `session`, `activity`, `delta`, `done`, and `error`.
 
 ## Portable Threads
 
-Use `RunWithThread` or `RunWithThreadStream` to let `oneagent` own the conversation history:
+Use `RunWithThread` or `RunWithThreadStream` to maintain conversation history across runs — even across different backends:
 
 ```go
 resp := client.RunWithThread(oneagent.RunOpts{
@@ -107,11 +107,11 @@ resp := client.RunWithThread(oneagent.RunOpts{
 
 This gives you:
 
-- native session reuse when the same backend is continuing the thread
-- cross-backend replay when a different backend picks the thread up
-- local thread storage and compaction helpers
+- Native session reuse when continuing on the same backend
+- Automatic context replay when switching to a different backend
+- Local thread storage with compaction to keep long conversations manageable
 
-Thread helpers:
+Thread management:
 
 ```go
 ids, err := client.ListThreads()
@@ -121,7 +121,7 @@ err = client.CompactThread("auth-fix", "claude")
 
 ## Custom Thread Storage
 
-Consumers that need isolated thread state can inject a store:
+By default, threads are stored on disk at `~/.local/state/oneagent/threads/`. To store threads elsewhere (for example, in a database or isolated directory), inject a custom store:
 
 ```go
 store := oneagent.FilesystemStore{Dir: "/tmp/my-app-threads"}
@@ -131,15 +131,23 @@ client := oneagent.Client{
 }
 ```
 
-Package-level helpers still use the default filesystem-backed store for backward compatibility.
+You can also implement the `Store` interface for fully custom storage:
 
-## Consumer Pattern
+```go
+type Store interface {
+	LoadThread(id string) (*Thread, error)
+	SaveThread(thread *Thread) error
+	ListThreads() ([]string, error)
+}
+```
 
-The most common embedding pattern is:
+## Typical Integration Pattern
 
-1. Keep app-level state such as selected backend, selected model, and current thread ID.
-2. Call `RunWithThreadStream`.
-3. Render `activity` and `delta` incrementally in your UI.
-4. Replace or finalize the UI with `resp.Result` once the stream ends.
+Most applications follow this pattern:
 
-See [consumer.md](./examples/consumer.md) for a concrete example.
+1. Keep your own app-level state (selected backend, model, current thread ID).
+2. Call `client.RunWithThreadStream` with the current state.
+3. Render `activity` and `delta` events incrementally in your UI.
+4. Finalize the UI with `resp.Result` once the stream ends.
+
+See [examples/consumer.md](./examples/consumer.md) for a complete, runnable example.

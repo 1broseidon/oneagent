@@ -1,8 +1,13 @@
 # oneagent
 
-One interface for every AI coding agent. Config-driven, zero code changes to add new backends.
+Config-driven multi-agent CLI.
 
-`oa` wraps any agent CLI (Claude, Codex, Cursor, OpenCode, Cline, Pi, ...) behind one interface. The CLI defaults to human-friendly text output, with `--json` for final machine-readable output and `--stream --json` or `--jsonl` for normalized JSONL events. Define backends in a config file with command templates, output parsing rules, and session support. Add new agents by editing a JSON file — no code required.
+`oa` gives Claude, Codex, OpenCode, Pi, and any future agent CLI a single normalized interface. Every backend gets the same flags, the same JSON and streaming output, and portable conversation threads. Adding a new agent is a JSON config edit — no code required.
+
+## Prerequisites
+
+- [Go 1.21+](https://go.dev/dl/) (for install via `go install`)
+- At least one supported agent CLI installed and signed in (e.g., `claude`, `codex`, `opencode`, or `pi`)
 
 ## Install
 
@@ -13,25 +18,22 @@ go install github.com/1broseidon/oneagent/cmd/oa@latest
 ## Quick start
 
 ```sh
-# Talk to Claude
+# Talk to Claude (the default backend)
 oa "explain this codebase"
-
-# Machine-readable final JSON
-oa --json "explain this codebase"
 
 # Use a different backend
 oa -b codex "fix the auth bug"
 
+# Machine-readable JSON output
+oa --json "explain this codebase"
+
 # Live text stream
 oa --stream "review the repo"
 
-# Normalized JSONL stream
-oa --stream --json "review the repo"
-
-# Shortcut for normalized JSONL stream
+# Normalized JSONL stream (for piping to other tools)
 oa --jsonl "review the repo"
 
-# Start or continue a portable thread
+# Portable threads — start on one backend, continue on another
 oa -t auth-fix "investigate the failing auth tests"
 oa -b codex -t auth-fix "patch the bug"
 oa -b claude -t auth-fix "summarize what changed"
@@ -39,26 +41,16 @@ oa -b claude -t auth-fix "summarize what changed"
 # Specify model and working directory
 oa -b pi -m "google/gemini-2.5-pro" -C ~/project "add tests"
 
-# Resume a session
+# Resume a native session
 oa -b claude -s abc123 "now refactor it"
 
-# Inspect or compact saved threads
+# Thread management
 oa thread list
 oa thread show auth-fix
 oa thread compact auth-fix
-
-# List configured backends
-oa list
 ```
 
-Built-in defaults ship for `claude`, `codex`, `opencode`, and `pi`, so `oa` works on first run if those CLIs are installed and signed in.
-
-## Docs
-
-- Release history: [CHANGELOG.md](./CHANGELOG.md)
-- Library guide: [docs/library.md](./docs/library.md)
-- Backend config reference: [docs/config.md](./docs/config.md)
-- Consumer example: [docs/examples/consumer.md](./docs/examples/consumer.md)
+Works out of the box if `claude`, `codex`, `opencode`, or `pi` is installed and signed in.
 
 ## Output
 
@@ -68,7 +60,7 @@ By default, `oa` prints plain text:
 Here's what I found...
 ```
 
-With `--json`, every invocation returns normalized JSON:
+With `--json`, every invocation returns a normalized response:
 
 ```json
 {
@@ -79,26 +71,14 @@ With `--json`, every invocation returns normalized JSON:
 }
 ```
 
-On error with `--json`:
-
-```json
-{
-  "result": "",
-  "session": "",
-  "thread_id": "auth-fix",
-  "backend": "cline",
-  "error": "Unauthorized: Please sign in to Cline before trying again."
-}
-```
-
-With `--stream`, `oa` prints a human-friendly live stream:
+With `--stream`, you get live text output with activity indicators on stderr:
 
 ```text
 [activity] Read README.md
 OK
 ```
 
-With `--stream --json` or `--jsonl`, output is normalized JSONL:
+With `--jsonl` (or `--stream --json`), output is normalized JSONL — one event per line:
 
 ```json
 {"type":"session","backend":"claude","session":"abc123-def456"}
@@ -107,198 +87,96 @@ With `--stream --json` or `--jsonl`, output is normalized JSONL:
 {"type":"done","backend":"claude","session":"abc123-def456","result":"OK"}
 ```
 
-The normalized stream shape is intentionally small: `session`, optional `activity`, optional `delta`, then final `done` or `error`.
+Events are intentionally simple: `session`, optional `activity`, optional `delta`, then `done` or `error`.
 
 ## Portable threads
 
-Use `-t/--thread` to make `oneagent` own the conversation history instead of relying only on a backend-native session ID.
+Threads let `oa` own the conversation history instead of relying on a single backend's session.
 
-Thread behavior:
-
-- Same backend, same thread: reuse that backend's native session when that backend was the last contributor.
-- Switched backends: rebuild context from the saved thread summary and turns, then continue on the new backend.
+- **Same backend, same thread**: reuses that backend's native session when it was the last to contribute.
+- **Different backend**: rebuilds context from saved turns and continues on the new backend.
 - `--thread` and `--session` are mutually exclusive.
 - Threads are stored locally in `~/.local/state/oneagent/threads/<id>.json`.
 
-Thread commands:
-
-```sh
-oa thread list
-oa thread show <id>
-oa thread compact <id> [-b backend]
-```
-
-`oa thread compact` summarizes older turns and keeps recent turns verbatim so long-running threads stay portable without growing without bound.
+Use `oa thread compact <id>` to summarize older turns and keep long-running threads manageable.
 
 ## Configuration
 
-For the full backend config reference, examples, and matching rules, see [docs/config.md](./docs/config.md).
+`oa` ships with built-in defaults for `claude`, `codex`, `opencode`, and `pi` — no config file needed.
 
-`oa` embeds default configs for `claude`, `codex`, `opencode`, and `pi`.
-
-If `~/.config/oneagent/backends.json` exists, any same-named backend replaces the built-in definition and any new backend is added alongside the defaults.
-
-Use `-c /path/to/backends.json` to load only a specific config file.
-
-Example override file:
+To override a built-in backend or add a new one, create `~/.config/oneagent/backends.json`:
 
 ```json
 {
-  "claude": {
-    "run": "claude -p {prompt} --model {model} --output-format stream-json --include-partial-messages --verbose",
-    "resume": "+ --resume {session}",
-    "system": "You are a helpful assistant.",
-    "format": "jsonl",
-    "activity": "{message.content.0.name} {message.content.0.input.file_path}",
-    "activity_when": "type=assistant&message.content.0.type=tool_use",
-    "delta": "event.delta.text",
-    "delta_when": "type=stream_event&event.type=content_block_delta&event.delta.type=text_delta",
-    "result": "result",
-    "result_when": "type=result&is_error=false",
-    "session": "session_id",
-    "session_when": "type=system",
-    "error": "result",
-    "error_when": "type=result&is_error=true",
-    "model": "sonnet"
-  },
-  "codex": {
-    "run": "codex exec {prompt} --json --full-auto -C {cwd}",
-    "resume": "codex exec resume {session} {prompt} --json --full-auto",
-    "format": "jsonl",
-    "activity": "{item.command}",
-    "activity_when": "type=item.started&item.type=command_execution",
-    "delta": "assistantMessageEvent.delta",
-    "delta_when": "type=message_update&assistantMessageEvent.type=text_delta",
-    "result": "item.text",
-    "result_when": "type=item.completed",
-    "session": "thread_id",
-    "session_when": "type=thread.started",
-    "error": "message",
-    "error_when": "type=error"
+  "my-agent": {
+    "run": "my-agent --prompt {prompt} --model {model}",
+    "format": "json",
+    "result": "output.text",
+    "session": "session_id"
   }
 }
 ```
 
-### Backend fields
+Same-named entries replace the built-in. New entries are added alongside defaults. Use `-c /path/to/backends.json` to load only a specific file.
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `run` | yes | Command template as a string. Variables: `{prompt}`, `{model}`, `{cwd}`, `{session}` |
-| `resume` | no | Resume command as a full string, or a patch like `+ --resume {session}` inserted after `{prompt}` |
-| `system` | no | Prepended to prompt on first message (no active session) |
-| `format` | yes | Output format: `json` (single object) or `jsonl` (line-delimited events) |
-| `activity` | no | Dot-path or template for a generic pre-final activity message |
-| `activity_when` | no | Match condition for activity events |
-| `delta` | no | Dot-path to a streaming text chunk for `--stream` |
-| `delta_when` | no | Match condition for streaming delta events |
-| `result` | yes | Dot-path to result text (e.g. `result`, `item.text`, `assistantMessageEvent.delta`) |
-| `result_when` | no | Match condition for jsonl (e.g. `type=item.completed`). Supports `&` for AND |
-| `result_append` | no | If `true`, accumulate result across multiple matching events (for streaming deltas) |
-| `session` | yes | Dot-path to session/thread ID |
-| `session_when` | no | Match condition for jsonl session events |
-| `error` | no | Dot-path to error message |
-| `error_when` | no | Match condition for error events |
-| `model` | no | Fallback model when none specified |
-
-### Template variables
-
-When a variable resolves to empty, both the variable and its preceding flag are dropped. So `--model {model}` cleanly disappears when no model is set, letting the backend use its own default.
-
-### Command strings
-
-`run` and `resume` are tokenized into argv without invoking a shell. Quotes and backslash escapes are supported for readability, but commands are still executed directly.
-
-### Match conditions
-
-`activity_when`, `delta_when`, `result_when`, `session_when`, and `error_when` use `key=value` syntax with dot-paths:
-
-```
-type=item.completed                     # single condition
-type=message_update&assistantMessageEvent.type=text_delta   # AND conditions
-```
-
-Activity templates can interpolate dot-paths with `{...}` placeholders. Numeric path segments index arrays, so `{message.content.0.name}` is valid.
+For the full config schema, field reference, match conditions, and example backends, see [docs/config.md](./docs/config.md).
 
 ## Use as a library
 
-For the full library embedding guide, see [docs/library.md](./docs/library.md).
+```sh
+go get github.com/1broseidon/oneagent@latest
+```
 
 ```go
 import "github.com/1broseidon/oneagent"
 
-backends, _ := oneagent.LoadBackends("") // embedded defaults + ~/.config overlay
+backends, _ := oneagent.LoadBackends("")
 client := oneagent.Client{Backends: backends}
 
+// One-shot
 resp := client.Run(oneagent.RunOpts{
     Backend: "claude",
     Prompt:  "explain this code",
     CWD:     "/path/to/project",
 })
-
 fmt.Println(resp.Result)
-fmt.Println(resp.Session) // for resume
-```
 
-Streaming from Go:
-
-```go
+// Streaming
 client.RunStream(oneagent.RunOpts{
     Backend: "claude",
     Prompt:  "review the repo",
-    CWD:     "/path/to/project",
-}, func(event oneagent.StreamEvent) {
-    fmt.Println(event.Type, event.Activity, event.Delta, event.Result)
+}, func(ev oneagent.StreamEvent) {
+    fmt.Print(ev.Delta)
 })
-```
 
-Portable threads from Go:
-
-```go
-resp := client.RunWithThread(oneagent.RunOpts{
+// Portable threads
+resp = client.RunWithThread(oneagent.RunOpts{
     Backend:  "claude",
     ThreadID: "auth-fix",
     Prompt:   "continue debugging",
-    CWD:      "/path/to/project",
 })
-
-fmt.Println(resp.Result)
-fmt.Println(resp.ThreadID)
 ```
 
-Package-level helpers such as `oneagent.Run`, `oneagent.RunWithThread`, `oneagent.ListThreads`, and `oneagent.CompactThread` still work and use the default filesystem-backed thread store for backward compatibility.
-
-Custom thread storage:
-
-```go
-store := oneagent.FilesystemStore{Dir: "/tmp/my-app-threads"}
-client := oneagent.Client{
-    Backends: backends,
-    Store:    store,
-}
-
-resp := client.RunWithThread(oneagent.RunOpts{
-    Backend:  "claude",
-    ThreadID: "chat-42",
-    Prompt:   "continue debugging",
-})
-
-thread, _ := client.LoadThread("chat-42")
-ids, _ := client.ListThreads()
-```
+For the full library API, streaming details, custom thread storage, and integration patterns, see [docs/library.md](./docs/library.md).
 
 ## Supported backends
 
-Built-in defaults:
+| Backend  | CLI            | Session resume       |
+|----------|----------------|----------------------|
+| Claude   | `claude`       | `--resume`           |
+| Codex    | `codex exec`   | `codex exec resume`  |
+| OpenCode | `opencode run` | `--session`          |
+| Pi       | `pi`           | `--session`          |
 
-| Backend | CLI | Format | Session resume |
-|---------|-----|--------|---------------|
-| Claude | `claude` | jsonl | `--resume` |
-| Codex | `codex exec` | jsonl | `codex exec resume` |
-| OpenCode | `opencode run` | jsonl | `--session` |
-| Pi | `pi` | jsonl | `--session` |
+Any CLI that outputs JSON or line-delimited JSON can be added via [config](./docs/config.md).
 
-Any CLI that outputs JSON or line-delimited JSON can be added via config.
+## Docs
+
+- [Changelog](./CHANGELOG.md)
+- [Go library guide](./docs/library.md)
+- [Backend config reference](./docs/config.md)
+- [Integration example](./docs/examples/consumer.md)
 
 ## License
 
-MIT
+[MIT](./LICENSE)

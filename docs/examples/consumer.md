@@ -1,55 +1,75 @@
-# Consumer Example
+# Building an App with oneagent
 
-This page describes a typical embedded consumer of `oneagent` as a Go library, such as a chat app, bot, TUI, editor integration, or service wrapper.
+This example shows a complete, runnable Go program that uses `oneagent` as a library. It demonstrates the typical integration pattern: load backends, stream a prompt, and render output incrementally.
 
-## What the Consumer Stores Itself
-
-The consumer typically keeps its own app-level state:
-
-- selected backend
-- selected model
-- selected thread ID
-- UI-specific cursor or delivery state
-
-That state lives in its own config directory and is separate from `oneagent`.
-
-## What the Consumer Delegates to oneagent
-
-For agent execution, the consumer delegates almost everything:
-
-- backend dispatch
-- session handling
-- portable threads
-- streaming events
-- final normalized result
-
-The core dispatch path is:
+## Full Example
 
 ```go
-resp := oneagent.RunWithThreadStream(backends, opts, emit)
+package main
+
+import (
+	"fmt"
+	"log"
+	"os"
+
+	"github.com/1broseidon/oneagent"
+)
+
+func main() {
+	// Load embedded backend defaults + any user overrides.
+	backends, err := oneagent.LoadBackends("")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	client := oneagent.Client{Backends: backends}
+
+	// Build the request. ThreadID makes the conversation portable
+	// across backends — omit it for one-shot prompts.
+	opts := oneagent.RunOpts{
+		Backend:  "claude",
+		ThreadID: "my-thread",
+		Prompt:   "explain the main function",
+		CWD:      ".",
+	}
+
+	// Stream the response, rendering events as they arrive.
+	resp := client.RunWithThreadStream(opts, func(ev oneagent.StreamEvent) {
+		switch ev.Type {
+		case "session":
+			fmt.Fprintf(os.Stderr, "session: %s\n", ev.Session)
+		case "activity":
+			fmt.Fprintf(os.Stderr, "[%s]\n", ev.Activity)
+		case "delta":
+			fmt.Print(ev.Delta)
+		case "done":
+			// Stream finished — resp.Result has the full text.
+		case "error":
+			fmt.Fprintf(os.Stderr, "error: %s\n", ev.Error)
+		}
+	})
+
+	if resp.Error != "" {
+		log.Fatal(resp.Error)
+	}
+
+	fmt.Fprintf(os.Stderr, "\nthread: %s  session: %s\n", resp.ThreadID, resp.Session)
+}
 ```
 
-## UI Pattern
+## What This Demonstrates
 
-The consumer creates a placeholder or pending UI state, then:
+**Backend loading** — `LoadBackends("")` loads the built-in defaults (Claude, Codex, OpenCode, Pi) and merges any overrides from `~/.config/oneagent/backends.json`.
 
-1. logs `activity` events
-2. accumulates `delta` text
-3. updates the UI periodically
-4. replaces the placeholder with `resp.Result` at the end
+**Streaming** — `RunWithThreadStream` calls the backend CLI and emits normalized events as they arrive. Your app renders `activity` and `delta` events immediately instead of waiting for the full response.
 
-This is a good example of the intended library contract:
+**Portable threads** — Setting `ThreadID` tells oneagent to maintain conversation history. If you later switch to a different backend (e.g., `codex`), oneagent replays the thread context automatically.
 
-- `oneagent` owns normalization
-- the consumer owns UI policy
+**Normalized output** — Every backend returns the same `Response` and `StreamEvent` types, so your rendering code works regardless of which agent is running.
 
-## Why This Example Matters
+## Adapting This Pattern
 
-This pattern is useful because it shows how little glue is needed once `oneagent` provides:
-
-- a stable `RunOpts` input
-- normalized `Response`
-- normalized `StreamEvent`
-- portable thread management
-
-If you are embedding `oneagent` into a chat app, TUI, editor extension, or web service, this is the basic pattern to follow.
+- **Chat app or TUI**: Replace `fmt.Print` with your UI rendering logic. Use `activity` events for status indicators and `delta` events for incremental text display.
+- **Web service**: Marshal `StreamEvent` to JSON and send as server-sent events (SSE) or WebSocket frames.
+- **Editor extension**: Use `activity` events to show progress in a status bar and `delta` events to populate an output panel.
+- **One-shot scripts**: Drop `ThreadID` and use `client.Run` instead of `RunWithThreadStream` for a simple prompt-in, result-out flow.
