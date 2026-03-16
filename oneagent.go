@@ -9,6 +9,7 @@ package oneagent
 
 import (
 	"bufio"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -44,6 +45,17 @@ type Response struct {
 	Error    string `json:"error,omitempty"`
 }
 
+// StreamEvent is a normalized incremental event emitted during a streaming run.
+type StreamEvent struct {
+	Type     string `json:"type"`
+	Backend  string `json:"backend"`
+	ThreadID string `json:"thread_id,omitempty"`
+	Session  string `json:"session,omitempty"`
+	Delta    string `json:"delta,omitempty"`
+	Result   string `json:"result,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
 // RunOpts configures a single agent invocation.
 type RunOpts struct {
 	Backend   string
@@ -60,9 +72,25 @@ func ConfigDir() string {
 	return filepath.Join(home, ".config", "oneagent")
 }
 
-// LoadBackends reads backend definitions from a JSON file and compiles the
-// compact config format into canonical Backend structs.
+// DefaultConfigPath returns the optional user override config path.
+func DefaultConfigPath() string {
+	return filepath.Join(ConfigDir(), "backends.json")
+}
+
+//go:embed defaults/backends.json
+var embeddedBackends []byte
+
+// LoadBackends loads embedded defaults when path is empty and merges the
+// optional user override file (~/.config/oneagent/backends.json) on top.
+// When path is non-empty, only that file is loaded.
 func LoadBackends(path string) (map[string]Backend, error) {
+	if path == "" {
+		return loadDefaultBackends()
+	}
+	return loadBackendsFile(path)
+}
+
+func loadBackendsFile(path string) (map[string]Backend, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -70,8 +98,37 @@ func LoadBackends(path string) (map[string]Backend, error) {
 	return loadCompactBackends(data)
 }
 
+func loadDefaultBackends() (map[string]Backend, error) {
+	backends, err := loadCompactBackends(embeddedBackends)
+	if err != nil {
+		return nil, fmt.Errorf("invalid embedded backends: %w", err)
+	}
+	if err := mergeBackendsFile(backends, DefaultConfigPath()); err != nil {
+		return nil, err
+	}
+	return backends, nil
+}
+
+func mergeBackendsFile(backends map[string]Backend, path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	overrides, err := loadCompactBackends(data)
+	if err != nil {
+		return err
+	}
+	for name, backend := range overrides {
+		backends[name] = backend
+	}
+	return nil
+}
+
 // Run executes a prompt against the specified backend and returns a normalized response.
-func buildCmd(b Backend, opts RunOpts) *exec.Cmd {
+func buildCmd(b Backend, opts RunOpts) (*exec.Cmd, error) {
 	model := opts.Model
 	if model == "" {
 		model = b.DefaultModel
@@ -94,30 +151,46 @@ func buildCmd(b Backend, opts RunOpts) *exec.Cmd {
 		tmpl = b.ResumeCmd
 	}
 	args := substArgs(tmpl, vars)
+	if len(args) == 0 {
+		return nil, fmt.Errorf("backend %q produced an empty command", opts.Backend)
+	}
 
 	cmd := exec.Command(args[0], args[1:]...)
 	if opts.CWD != "" && !containsVar(b.Cmd, "{cwd}") {
 		cmd.Dir = opts.CWD
 	}
 	cmd.Env = os.Environ()
-	return cmd
+	return cmd, nil
 }
 
 // Run executes a prompt against the specified backend and returns a normalized response.
 func Run(backends map[string]Backend, opts RunOpts) Response {
+	return run(backends, opts, nil)
+}
+
+// RunStream executes a prompt and emits normalized streaming events as they arrive.
+func RunStream(backends map[string]Backend, opts RunOpts, emit func(StreamEvent)) Response {
+	resp := run(backends, opts, emit)
+	emitFinal(emit, finalEvent(resp))
+	return resp
+}
+
+func run(backends map[string]Backend, opts RunOpts, emit func(StreamEvent)) Response {
 	b, ok := backends[opts.Backend]
 	if !ok {
 		return Response{Error: "backend not configured: " + opts.Backend, Backend: opts.Backend}
 	}
 
-	cmd := buildCmd(b, opts)
+	cmd, err := buildCmd(b, opts)
+	if err != nil {
+		return Response{Error: err.Error(), Backend: opts.Backend}
+	}
 
 	var result, session string
-	var err error
 
 	switch b.Format {
 	case "jsonl":
-		result, session, err = runJSONL(cmd, b)
+		result, session, err = runJSONL(cmd, b, opts.Backend, emit)
 	default:
 		result, session, err = runJSON(cmd, b)
 	}
@@ -193,7 +266,7 @@ func runJSON(cmd *exec.Cmd, b Backend) (result, session string, err error) {
 	return result, session, nil
 }
 
-func runJSONL(cmd *exec.Cmd, b Backend) (result, session string, err error) {
+func runJSONL(cmd *exec.Cmd, b Backend, backend string, emit func(StreamEvent)) (result, session string, err error) {
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", "", err
@@ -206,7 +279,8 @@ func runJSONL(cmd *exec.Cmd, b Backend) (result, session string, err error) {
 
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	result, session, lastErr := scanJSONL(scanner, b)
+	result, session, lastErr := scanJSONL(scanner, b, backend, emit)
+	scanErr := scanner.Err()
 
 	if err = cmd.Wait(); err != nil {
 		if s := stderr.String(); s != "" {
@@ -215,6 +289,9 @@ func runJSONL(cmd *exec.Cmd, b Backend) (result, session string, err error) {
 		if result == "" && lastErr != "" {
 			result = lastErr
 		}
+	}
+	if err == nil && scanErr != nil {
+		err = scanErr
 	}
 	return result, session, err
 }
@@ -228,7 +305,7 @@ func extractField(line map[string]any, when, field string) string {
 	return ""
 }
 
-func scanJSONL(scanner *bufio.Scanner, b Backend) (result, session, lastErr string) {
+func scanJSONL(scanner *bufio.Scanner, b Backend, backend string, emit func(StreamEvent)) (result, session, lastErr string) {
 	for scanner.Scan() {
 		var line map[string]any
 		if err := json.Unmarshal(scanner.Bytes(), &line); err != nil {
@@ -238,7 +315,10 @@ func scanJSONL(scanner *bufio.Scanner, b Backend) (result, session, lastErr stri
 			lastErr = v
 		}
 		if v := extractField(line, b.SessionWhen, b.Session); v != "" {
-			session = v
+			if v != session {
+				session = v
+				emitEvent(emit, StreamEvent{Type: "session", Backend: backend, Session: session})
+			}
 		}
 		if v := extractField(line, b.ResultWhen, b.Result); v != "" {
 			if b.ResultAppend {
@@ -246,6 +326,7 @@ func scanJSONL(scanner *bufio.Scanner, b Backend) (result, session, lastErr stri
 			} else {
 				result = v
 			}
+			emitEvent(emit, StreamEvent{Type: "delta", Backend: backend, Session: session, Delta: v})
 		}
 	}
 	return
@@ -272,10 +353,46 @@ func matchWhen(m map[string]any, when string) bool {
 		if !ok {
 			return false
 		}
-		got, _ := jsonGet(m, k).(string)
-		if got != v {
+		if stringifyValue(jsonGet(m, k)) != v {
 			return false
 		}
 	}
 	return true
+}
+
+func stringifyValue(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return x
+	default:
+		return fmt.Sprint(x)
+	}
+}
+
+func finalEvent(resp Response) StreamEvent {
+	event := StreamEvent{
+		Backend:  resp.Backend,
+		ThreadID: resp.ThreadID,
+		Session:  resp.Session,
+	}
+	if resp.Error != "" {
+		event.Type = "error"
+		event.Error = resp.Error
+		return event
+	}
+	event.Type = "done"
+	event.Result = resp.Result
+	return event
+}
+
+func emitEvent(emit func(StreamEvent), event StreamEvent) {
+	if emit != nil {
+		emit(event)
+	}
+}
+
+func emitFinal(emit func(StreamEvent), event StreamEvent) {
+	emitEvent(emit, event)
 }

@@ -1,6 +1,10 @@
 package oneagent
 
 import (
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -61,6 +65,36 @@ func TestJSONLEventExtraction(t *testing.T) {
 	}
 	if resp.Session != "sess-42" {
 		t.Fatalf("session = %q, want %q", resp.Session, "sess-42")
+	}
+}
+
+func TestRunStreamEmitsNormalizedEvents(t *testing.T) {
+	events := `{"type":"session","sid":"sess-42"}
+{"type":"delta","data":{"text":"one"}}
+{"type":"delta","data":{"text":"two"}}
+`
+	b := fakeJSONL(events)
+	b.ResultAppend = true
+	b.SessionWhen = "type=session"
+	backends := map[string]Backend{"jl": b}
+
+	var got []StreamEvent
+	resp := RunStream(backends, RunOpts{Backend: "jl", Prompt: "hi"}, func(event StreamEvent) {
+		got = append(got, event)
+	})
+
+	if resp.Result != "onetwo" {
+		t.Fatalf("result = %q, want %q", resp.Result, "onetwo")
+	}
+
+	want := []StreamEvent{
+		{Type: "session", Backend: "jl", Session: "sess-42"},
+		{Type: "delta", Backend: "jl", Session: "sess-42", Delta: "one"},
+		{Type: "delta", Backend: "jl", Session: "sess-42", Delta: "two"},
+		{Type: "done", Backend: "jl", Session: "sess-42", Result: "onetwo"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("events = %+v, want %+v", got, want)
 	}
 }
 
@@ -129,7 +163,10 @@ func TestDefaultModelUsed(t *testing.T) {
 	// No model override — but {model} isn't in the cmd template above, so we
 	// test via buildCmd directly.
 	b := backends["m"]
-	cmd := buildCmd(b, RunOpts{Backend: "m", Prompt: "hi"})
+	cmd, err := buildCmd(b, RunOpts{Backend: "m", Prompt: "hi"})
+	if err != nil {
+		t.Fatalf("buildCmd returned error: %v", err)
+	}
 	// The command should have been built; default model is applied internally.
 	// We verify buildCmd doesn't panic and returns a valid cmd.
 	if cmd.Path == "" {
@@ -158,7 +195,10 @@ func TestSystemPromptPrependedOnFirstMessage(t *testing.T) {
 		Cmd:          []string{"agent", "--prompt", "{prompt}"},
 		SystemPrompt: "SYSPROMPT",
 	}
-	cmd := buildCmd(b, RunOpts{Backend: "sp", Prompt: "hello"})
+	cmd, err := buildCmd(b, RunOpts{Backend: "sp", Prompt: "hello"})
+	if err != nil {
+		t.Fatalf("buildCmd returned error: %v", err)
+	}
 	found := false
 	for _, a := range cmd.Args {
 		if a == "SYSPROMPT\n\nhello" {
@@ -176,7 +216,10 @@ func TestSystemPromptSkippedOnResume(t *testing.T) {
 		ResumeCmd:    []string{"agent", "--session", "{session}", "--prompt", "{prompt}"},
 		SystemPrompt: "SYSPROMPT",
 	}
-	cmd := buildCmd(b, RunOpts{Backend: "sp", Prompt: "hello", SessionID: "s1"})
+	cmd, err := buildCmd(b, RunOpts{Backend: "sp", Prompt: "hello", SessionID: "s1"})
+	if err != nil {
+		t.Fatalf("buildCmd returned error: %v", err)
+	}
 	for _, a := range cmd.Args {
 		if a == "SYSPROMPT\n\nhello" {
 			t.Fatal("system prompt should not be prepended on resume")
@@ -189,7 +232,10 @@ func TestResumeCmdSelectedWithSession(t *testing.T) {
 		Cmd:       []string{"agent", "--prompt", "{prompt}"},
 		ResumeCmd: []string{"agent", "--resume", "{session}", "--prompt", "{prompt}"},
 	}
-	cmd := buildCmd(b, RunOpts{Backend: "r", Prompt: "hi", SessionID: "s99"})
+	cmd, err := buildCmd(b, RunOpts{Backend: "r", Prompt: "hi", SessionID: "s99"})
+	if err != nil {
+		t.Fatalf("buildCmd returned error: %v", err)
+	}
 	found := false
 	for _, a := range cmd.Args {
 		if a == "s99" {
@@ -203,7 +249,10 @@ func TestResumeCmdSelectedWithSession(t *testing.T) {
 
 func TestCwdSetWhenNotInTemplate(t *testing.T) {
 	b := Backend{Cmd: []string{"sh", "-c", "echo ok"}}
-	cmd := buildCmd(b, RunOpts{Backend: "c", Prompt: "hi", CWD: "/tmp/test"})
+	cmd, err := buildCmd(b, RunOpts{Backend: "c", Prompt: "hi", CWD: "/tmp/test"})
+	if err != nil {
+		t.Fatalf("buildCmd returned error: %v", err)
+	}
 	if cmd.Dir != "/tmp/test" {
 		t.Fatalf("cmd.Dir = %q, want /tmp/test", cmd.Dir)
 	}
@@ -211,8 +260,122 @@ func TestCwdSetWhenNotInTemplate(t *testing.T) {
 
 func TestCwdNotSetWhenInTemplate(t *testing.T) {
 	b := Backend{Cmd: []string{"agent", "-C", "{cwd}", "--prompt", "{prompt}"}}
-	cmd := buildCmd(b, RunOpts{Backend: "c", Prompt: "hi", CWD: "/tmp/test"})
+	cmd, err := buildCmd(b, RunOpts{Backend: "c", Prompt: "hi", CWD: "/tmp/test"})
+	if err != nil {
+		t.Fatalf("buildCmd returned error: %v", err)
+	}
 	if cmd.Dir != "" {
 		t.Fatalf("cmd.Dir = %q, want empty (cwd in template)", cmd.Dir)
 	}
+}
+
+func TestBuildCmdReturnsErrorWhenSubstitutionRemovesExecutable(t *testing.T) {
+	b := Backend{Cmd: []string{"{cwd}"}}
+	_, err := buildCmd(b, RunOpts{Backend: "broken", Prompt: "hi"})
+	if err == nil {
+		t.Fatal("buildCmd should fail when command becomes empty")
+	}
+	if !strings.Contains(err.Error(), `backend "broken" produced an empty command`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestMatchWhenHandlesBooleanValues(t *testing.T) {
+	line := map[string]any{"type": "result", "is_error": true}
+	if !matchWhen(line, "type=result&is_error=true") {
+		t.Fatal("matchWhen should match boolean values")
+	}
+}
+
+func TestLoadBackendsUsesEmbeddedDefaultsWhenUserConfigMissing(t *testing.T) {
+	setupThreadHome(t)
+
+	backends, err := LoadBackends("")
+	if err != nil {
+		t.Fatalf("LoadBackends: %v", err)
+	}
+
+	for _, name := range []string{"claude", "codex", "opencode", "pi"} {
+		if _, ok := backends[name]; !ok {
+			t.Fatalf("embedded backend %q missing from %v", name, mapsKeys(backends))
+		}
+	}
+}
+
+func TestLoadBackendsMergesUserOverridesOntoDefaults(t *testing.T) {
+	setupThreadHome(t)
+
+	if err := os.MkdirAll(ConfigDir(), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+
+	override := `{
+		"claude": {
+			"run": "custom-claude --prompt {prompt}",
+			"format": "json",
+			"result": "result",
+			"session": "session"
+		},
+		"custom": {
+			"run": "custom-agent {prompt}",
+			"format": "json",
+			"result": "result",
+			"session": "session"
+		}
+	}`
+	if err := os.WriteFile(DefaultConfigPath(), []byte(override), 0o644); err != nil {
+		t.Fatalf("write override config: %v", err)
+	}
+
+	backends, err := LoadBackends("")
+	if err != nil {
+		t.Fatalf("LoadBackends: %v", err)
+	}
+
+	if got := backends["claude"].Cmd[0]; got != "custom-claude" {
+		t.Fatalf("claude override not applied, cmd[0] = %q", got)
+	}
+	if _, ok := backends["custom"]; !ok {
+		t.Fatalf("custom backend missing from %v", mapsKeys(backends))
+	}
+	if _, ok := backends["codex"]; !ok {
+		t.Fatal("embedded defaults should remain when overlay adds/replaces entries")
+	}
+}
+
+func TestLoadBackendsExplicitPathBypassesEmbeddedDefaults(t *testing.T) {
+	setupThreadHome(t)
+
+	customPath := filepath.Join(t.TempDir(), "backends.json")
+	config := `{
+		"only": {
+			"run": "only-agent {prompt}",
+			"format": "json",
+			"result": "result",
+			"session": "session"
+		}
+	}`
+	if err := os.WriteFile(customPath, []byte(config), 0o644); err != nil {
+		t.Fatalf("write explicit config: %v", err)
+	}
+
+	backends, err := LoadBackends(customPath)
+	if err != nil {
+		t.Fatalf("LoadBackends: %v", err)
+	}
+
+	if len(backends) != 1 {
+		t.Fatalf("explicit config should load only its own backends, got %v", mapsKeys(backends))
+	}
+	if _, ok := backends["only"]; !ok {
+		t.Fatalf("explicit backend missing from %v", mapsKeys(backends))
+	}
+}
+
+func mapsKeys(backends map[string]Backend) []string {
+	keys := make([]string, 0, len(backends))
+	for name := range backends {
+		keys = append(keys, name)
+	}
+	return keys
 }

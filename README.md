@@ -39,6 +39,8 @@ oa thread compact auth-fix
 oa list
 ```
 
+Built-in defaults ship for `claude`, `codex`, `opencode`, and `pi`, so `oa` works on first run if those CLIs are installed and signed in.
+
 ## Output
 
 Every invocation returns normalized JSON:
@@ -64,6 +66,14 @@ On error:
 }
 ```
 
+With `--stream`, output is normalized JSONL:
+
+```json
+{"type":"session","backend":"claude","session":"abc123-def456"}
+{"type":"delta","backend":"claude","session":"abc123-def456","delta":"OK"}
+{"type":"done","backend":"claude","session":"abc123-def456","result":"OK"}
+```
+
 ## Portable threads
 
 Use `-t/--thread` to make `oneagent` own the conversation history instead of relying only on a backend-native session ID.
@@ -87,19 +97,28 @@ oa thread compact <id> [-b backend]
 
 ## Configuration
 
-Create `~/.config/oneagent/backends.json`:
+`oa` embeds default configs for `claude`, `codex`, `opencode`, and `pi`.
+
+If `~/.config/oneagent/backends.json` exists, any same-named backend replaces the built-in definition and any new backend is added alongside the defaults.
+
+Use `-c /path/to/backends.json` to load only a specific config file.
+
+Example override file:
 
 ```json
 {
   "claude": {
-    "run": "claude -p {prompt} --model {model} --output-format json",
+    "run": "claude -p {prompt} --model {model} --output-format stream-json --include-partial-messages --verbose",
     "resume": "+ --resume {session}",
     "system": "You are a helpful assistant.",
-    "format": "json",
-    "result": "result",
+    "format": "jsonl",
+    "result": "event.delta.text",
+    "result_when": "type=stream_event&event.type=content_block_delta&event.delta.type=text_delta",
+    "result_append": true,
     "session": "session_id",
+    "session_when": "type=system",
     "error": "result",
-    "error_when": "is_error=true",
+    "error_when": "type=result&is_error=true",
     "model": "sonnet"
   },
   "codex": {
@@ -155,7 +174,7 @@ type=message_update&assistantMessageEvent.type=text_delta   # AND conditions
 ```go
 import "github.com/1broseidon/oneagent"
 
-backends, _ := oneagent.LoadBackends("backends.json")
+backends, _ := oneagent.LoadBackends("") // embedded defaults + ~/.config overlay
 
 resp := oneagent.Run(backends, oneagent.RunOpts{
     Backend: "claude",
@@ -183,15 +202,13 @@ fmt.Println(resp.ThreadID)
 
 ## Supported backends
 
-Tested and working out of the box:
+Built-in defaults:
 
 | Backend | CLI | Format | Session resume |
 |---------|-----|--------|---------------|
-| Claude | `claude` | json | `--resume` |
+| Claude | `claude` | jsonl | `--resume` |
 | Codex | `codex exec` | jsonl | `codex exec resume` |
 | OpenCode | `opencode run` | jsonl | `--session` |
-| Cursor | `cursor-agent` | jsonl | `--resume` |
-| Cline | `cline` | jsonl | `-T` |
 | Pi | `pi` | jsonl | `--session` |
 
 Any CLI that outputs JSON or line-delimited JSON can be added via config.

@@ -95,6 +95,47 @@ func TestSameBackendReusesNativeSession(t *testing.T) {
 	}
 }
 
+func TestRunWithThreadStreamEmitsThreadEventsAndPersistsSession(t *testing.T) {
+	setupThreadHome(t)
+
+	events := `{"type":"session","sid":"sa"}
+{"type":"delta","data":{"text":"hello"}}
+`
+	b := fakeJSONL(events)
+	b.ResultAppend = true
+	b.SessionWhen = "type=session"
+	backends := map[string]Backend{"a": b}
+
+	var got []StreamEvent
+	resp := RunWithThreadStream(backends, RunOpts{Backend: "a", Prompt: "one", ThreadID: "ts"}, func(event StreamEvent) {
+		got = append(got, event)
+	})
+
+	if resp.ThreadID != "ts" {
+		t.Fatalf("thread_id = %q, want ts", resp.ThreadID)
+	}
+	if len(got) != 3 {
+		t.Fatalf("events = %+v, want 3 events", got)
+	}
+	if got[0].Type != "session" || got[0].ThreadID != "ts" {
+		t.Fatalf("first event = %+v, want session with thread id", got[0])
+	}
+	if got[2].Type != "done" || got[2].ThreadID != "ts" {
+		t.Fatalf("final event = %+v, want done with thread id", got[2])
+	}
+
+	thread, err := LoadThread("ts")
+	if err != nil {
+		t.Fatalf("load thread: %v", err)
+	}
+	if thread.NativeSessions["a"] != "sa" {
+		t.Fatalf("native session = %q, want sa", thread.NativeSessions["a"])
+	}
+	if len(thread.Turns) != 2 {
+		t.Fatalf("turns = %d, want 2", len(thread.Turns))
+	}
+}
+
 func TestCrossBackendReplaysCanonicalContext(t *testing.T) {
 	setupThreadHome(t)
 

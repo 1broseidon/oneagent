@@ -149,8 +149,19 @@ func (t *Thread) recordTurns(original string, resp Response) {
 
 // RunWithThread wraps Run with thread load/save and context injection.
 func RunWithThread(backends map[string]Backend, opts RunOpts) Response {
+	return runWithThread(backends, opts, nil)
+}
+
+// RunWithThreadStream wraps RunStream with thread load/save and context injection.
+func RunWithThreadStream(backends map[string]Backend, opts RunOpts, emit func(StreamEvent)) Response {
+	resp := runWithThread(backends, opts, emit)
+	emitFinal(emit, finalEvent(resp))
+	return resp
+}
+
+func runWithThread(backends map[string]Backend, opts RunOpts, emit func(StreamEvent)) Response {
 	if opts.ThreadID == "" {
-		return Run(backends, opts)
+		return run(backends, opts, emit)
 	}
 
 	thread, err := LoadThread(opts.ThreadID)
@@ -159,7 +170,20 @@ func RunWithThread(backends map[string]Backend, opts RunOpts) Response {
 	}
 
 	original := prepareThreadPrompt(thread, &opts)
-	resp := Run(backends, opts)
+	var streamSaveErr error
+	resp := run(backends, opts, func(event StreamEvent) {
+		event.ThreadID = opts.ThreadID
+		if event.Type == "session" && event.Session != "" {
+			thread.NativeSessions[opts.Backend] = event.Session
+			if err := thread.Save(); err != nil && streamSaveErr == nil {
+				streamSaveErr = err
+			}
+		}
+		emitEvent(emit, event)
+	})
+	if streamSaveErr != nil {
+		resp.Error = "thread save failed: " + streamSaveErr.Error()
+	}
 
 	thread.recordTurns(original, resp)
 	if err := thread.Save(); err != nil {

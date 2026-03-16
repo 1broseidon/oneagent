@@ -69,3 +69,106 @@ func TestThreadCompactUsesExplicitConfigPath(t *testing.T) {
 		t.Fatalf("thread summary = %q, want %q", got.Summary, "summary")
 	}
 }
+
+func TestBackendProgramHandlesEmptyCmd(t *testing.T) {
+	if got := backendProgram(oneagent.Backend{}); got != "(invalid)" {
+		t.Fatalf("backendProgram(empty) = %q, want %q", got, "(invalid)")
+	}
+}
+
+func TestListUsesEmbeddedDefaultsWithoutUserConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cmd := exec.Command("go", "run", ".", "list")
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("oa list should succeed with embedded defaults, got err=%v output=%s", err, out)
+	}
+
+	for _, name := range []string{"claude", "codex", "opencode", "pi"} {
+		if !strings.Contains(string(out), name) {
+			t.Fatalf("oa list output missing %q:\n%s", name, out)
+		}
+	}
+}
+
+func TestListHonorsExplicitConfigPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	configPath := filepath.Join(home, "backends.json")
+	configJSON := []byte(`{
+		"only": {
+			"run": "only-agent {prompt}",
+			"format": "json",
+			"result": "result",
+			"session": "session"
+		}
+	}`)
+	if err := os.WriteFile(configPath, configJSON, 0o644); err != nil {
+		t.Fatalf("write backends: %v", err)
+	}
+
+	cmd := exec.Command("go", "run", ".", "list", "-c", configPath)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("oa list -c should succeed, got err=%v output=%s", err, out)
+	}
+
+	if !strings.Contains(string(out), "only") {
+		t.Fatalf("oa list -c output missing explicit backend:\n%s", out)
+	}
+	if strings.Contains(string(out), "claude") {
+		t.Fatalf("oa list -c should not merge embedded defaults:\n%s", out)
+	}
+}
+
+func TestStreamOutputsNormalizedJSONL(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	scriptPath := filepath.Join(home, "stream.sh")
+	script := "#!/bin/sh\n" +
+		"printf '%s\n' '{\"type\":\"session\",\"sid\":\"sess-1\"}'\n" +
+		"printf '%s\n' '{\"type\":\"delta\",\"data\":{\"text\":\"hello\"}}'\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	configPath := filepath.Join(home, "backends.json")
+	configJSON := []byte(`{
+		"s": {
+			"run": "` + scriptPath + `",
+			"format": "jsonl",
+			"result": "data.text",
+			"result_when": "type=delta",
+			"result_append": true,
+			"session": "sid",
+			"session_when": "type=session"
+		}
+	}`)
+	if err := os.WriteFile(configPath, configJSON, 0o644); err != nil {
+		t.Fatalf("write backends: %v", err)
+	}
+
+	cmd := exec.Command("go", "run", ".", "--stream", "-b", "s", "-c", configPath, "hi")
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("oa --stream should succeed, got err=%v output=%s", err, out)
+	}
+
+	text := string(out)
+	if !strings.Contains(text, `"type":"session"`) {
+		t.Fatalf("stream output missing session event:\n%s", text)
+	}
+	if !strings.Contains(text, `"type":"delta"`) {
+		t.Fatalf("stream output missing delta event:\n%s", text)
+	}
+	if !strings.Contains(text, `"type":"done"`) {
+		t.Fatalf("stream output missing done event:\n%s", text)
+	}
+}

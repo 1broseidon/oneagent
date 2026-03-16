@@ -1,0 +1,49 @@
+{
+  "claude": {
+    "run": "claude -p {prompt} --model {model} --output-format stream-json --include-partial-messages --verbose",
+    "resume": "+ --resume {session}",
+    "format": "jsonl",
+    "result": "event.delta.text",
+    "result_when": "type=stream_event&event.type=content_block_delta&event.delta.type=text_delta",
+    "result_append": true,
+    "session": "session_id",
+    "session_when": "type=system",
+    "error": "result",
+    "error_when": "type=result&is_error=true",
+    "model": "sonnet"
+  },
+  "codex": {
+    "run": "codex exec {prompt} --json --full-auto -C {cwd}",
+    "resume": "codex exec resume {session} {prompt} --json --full-auto",
+    "format": "jsonl",
+    "result": "item.text",
+    "result_when": "type=item.completed",
+    "session": "thread_id",
+    "session_when": "type=thread.started",
+    "error": "message",
+    "error_when": "type=error"
+  },
+  "opencode": {
+    "run": "opencode run {prompt} --format json --dir {cwd} --model {model}",
+    "resume": "+ --session {session}",
+    "format": "jsonl",
+    "result": "part.text",
+    "result_when": "type=text",
+    "session": "sessionID",
+    "session_when": "type=step_start",
+    "error": "part.text",
+    "error_when": "type=error"
+  },
+  "pi": {
+    "run": "pi -p {prompt} --mode json --model {model}",
+    "resume": "+ --session {session}",
+    "format": "jsonl",
+    "result": "assistantMessageEvent.delta",
+    "result_when": "type=message_update&assistantMessageEvent.type=text_delta",
+    "result_append": true,
+    "session": "id",
+    "session_when": "type=session",
+    "error": "message",
+    "error_when": "type=error"
+  }
+}

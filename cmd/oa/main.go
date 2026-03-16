@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/1broseidon/oneagent"
@@ -15,6 +14,7 @@ type cliOpts struct {
 	model      string
 	cwd        string
 	session    string
+	stream     bool
 	thread     string
 	configPath string
 	prompt     []string
@@ -31,6 +31,10 @@ func parseArgs(args []string) cliOpts {
 		"-c": &o.configPath, "--config": &o.configPath,
 	}
 	for i := 0; i < len(args); i++ {
+		if args[i] == "--stream" {
+			o.stream = true
+			continue
+		}
 		if dst, ok := flags[args[i]]; ok && i+1 < len(args) {
 			*dst = args[i+1]
 			i++
@@ -39,13 +43,6 @@ func parseArgs(args []string) cliOpts {
 		}
 	}
 	return o
-}
-
-func resolveConfig(path string) string {
-	if path != "" {
-		return path
-	}
-	return filepath.Join(oneagent.ConfigDir(), "backends.json")
 }
 
 func main() {
@@ -57,12 +54,17 @@ func main() {
 	}
 
 	if args[0] == "list" {
-		listBackends(resolveConfig(""))
+		args, configPath := parseConfigArgs(args[1:], "")
+		if len(args) != 0 {
+			fmt.Fprintln(os.Stderr, "usage: oa list [-c config]")
+			os.Exit(1)
+		}
+		listBackends(configPath)
 		return
 	}
 
 	if args[0] == "thread" {
-		threadCmd(args[1:], resolveConfig(""))
+		threadCmd(args[1:], "")
 		return
 	}
 
@@ -81,7 +83,7 @@ func runPrompt(o cliOpts) {
 		os.Exit(1)
 	}
 
-	backends, err := oneagent.LoadBackends(resolveConfig(o.configPath))
+	backends, err := oneagent.LoadBackends(o.configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -101,6 +103,11 @@ func runPrompt(o cliOpts) {
 		ThreadID:  o.thread,
 	}
 
+	if o.stream {
+		streamPrompt(backends, opts)
+		return
+	}
+
 	var resp oneagent.Response
 	if o.thread != "" {
 		resp = oneagent.RunWithThread(backends, opts)
@@ -116,8 +123,26 @@ func runPrompt(o cliOpts) {
 	}
 }
 
+func streamPrompt(backends map[string]oneagent.Backend, opts oneagent.RunOpts) {
+	emit := func(event oneagent.StreamEvent) {
+		out, _ := json.Marshal(event)
+		fmt.Println(string(out))
+	}
+
+	var resp oneagent.Response
+	if opts.ThreadID != "" {
+		resp = oneagent.RunWithThreadStream(backends, opts, emit)
+	} else {
+		resp = oneagent.RunStream(backends, opts, emit)
+	}
+
+	if resp.Error != "" {
+		os.Exit(1)
+	}
+}
+
 func threadCmd(args []string, configPath string) {
-	args, configPath = parseThreadConfig(args, configPath)
+	args, configPath = parseConfigArgs(args, configPath)
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "usage: oa thread <list|show|compact> [args]")
 		os.Exit(1)
@@ -156,7 +181,7 @@ func threadCmd(args []string, configPath string) {
 	}
 }
 
-func parseThreadConfig(args []string, configPath string) ([]string, string) {
+func parseConfigArgs(args []string, configPath string) ([]string, string) {
 	out := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		if args[i] == "-c" || args[i] == "--config" {
@@ -164,7 +189,7 @@ func parseThreadConfig(args []string, configPath string) ([]string, string) {
 				fmt.Fprintln(os.Stderr, "error: missing value for --config")
 				os.Exit(1)
 			}
-			configPath = resolveConfig(args[i+1])
+			configPath = args[i+1]
 			i++
 			continue
 		}
@@ -215,8 +240,15 @@ func listBackends(configPath string) {
 		if model == "" {
 			model = "(default)"
 		}
-		fmt.Printf("%-12s %s format=%s model=%s\n", name, b.Cmd[0], b.Format, model)
+		fmt.Printf("%-12s %s format=%s model=%s\n", name, backendProgram(b), b.Format, model)
 	}
+}
+
+func backendProgram(b oneagent.Backend) string {
+	if len(b.Cmd) == 0 || b.Cmd[0] == "" {
+		return "(invalid)"
+	}
+	return b.Cmd[0]
 }
 
 func usage() {
@@ -234,13 +266,16 @@ Flags:
   -m, --model <model>            Model override
   -C, --cwd <dir>                Working directory
   -s, --session <id>             Resume session (mutually exclusive with -t)
+  --stream                       Emit normalized JSONL events while running
   -t, --thread <id>              Start or continue a thread
-  -c, --config <path>            Config file (default: ~/.config/oneagent/backends.json)
+  -c, --config <path>            Use only this config file
 
 Output:
-  JSON with result, session, thread_id, backend, and error fields.
+  Default: JSON with result, session, thread_id, backend, and error fields.
+  --stream: JSONL events with session, delta, and final done/error records.
 
 Config:
-  Define backends in ~/.config/oneagent/backends.json.
+  Built-in defaults: claude, codex, opencode, pi.
+  ~/.config/oneagent/backends.json adds or replaces backends.
   See https://github.com/1broseidon/oneagent for format.`)
 }

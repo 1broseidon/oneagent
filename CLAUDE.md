@@ -4,7 +4,7 @@ Config-driven multi-agent CLI. One interface for Claude, Codex, Cursor, OpenCode
 
 ## What this is
 
-A Go library (`oneagent.go`, 280 lines) and CLI (`cmd/oa/main.go`, 131 lines) that wraps any AI agent CLI behind a unified JSON interface. Backends are defined in `~/.config/oneagent/backends.json` with command templates, output parsing rules (json/jsonl), session support, and error handling. Zero code changes to add a new backend.
+A Go library and CLI that wrap any AI agent CLI behind a unified JSON interface. Built-in backend defaults ship for Claude, Codex, OpenCode, and Pi, with optional overrides in `~/.config/oneagent/backends.json`. Zero code changes are required to add a new backend.
 
 ## Repo: https://github.com/1broseidon/oneagent
 
@@ -27,7 +27,6 @@ A Go library (`oneagent.go`, 280 lines) and CLI (`cmd/oa/main.go`, 131 lines) th
 
 - Wire tele (../tele) to use oneagent as a library instead of its own copy of the dispatch logic
 - Homebrew tap for `brew install oa`
-- Tests — there are none yet
-- Consider: default backends.json baked into the binary as fallback when no config file exists
+- Tests cover parsing, thread portability, and CLI flows
 - Consider: `oa init` command to scaffold the config
 - Consider: `--text` flag for plain text output (pipe-friendly, no JSON wrapping)
