@@ -100,11 +100,11 @@ func loadBackendsFile(path string) (map[string]Backend, error) {
 	if err != nil {
 		return nil, err
 	}
-	return loadCompactBackends(data)
+	return loadConfigBackends(data)
 }
 
 func loadDefaultBackends() (map[string]Backend, error) {
-	backends, err := loadCompactBackends(embeddedBackends)
+	backends, err := loadConfigBackends(embeddedBackends)
 	if err != nil {
 		return nil, fmt.Errorf("invalid embedded backends: %w", err)
 	}
@@ -122,7 +122,7 @@ func mergeBackendsFile(backends map[string]Backend, path string) error {
 		}
 		return err
 	}
-	overrides, err := loadCompactBackends(data)
+	overrides, err := loadConfigBackends(data)
 	if err != nil {
 		return err
 	}

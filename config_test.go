@@ -203,7 +203,7 @@ func TestLoadCompactBackends(t *testing.T) {
 			"model": "fast"
 		}
 	}`
-	backends, err := loadCompactBackends([]byte(config))
+	backends, err := loadConfigBackends([]byte(config))
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestLoadCompactBackends(t *testing.T) {
 
 func TestLoadCompactBackendsInvalidRun(t *testing.T) {
 	config := `{"bad": {"run": "sh -c \"unclosed"}}`
-	_, err := loadCompactBackends([]byte(config))
+	_, err := loadConfigBackends([]byte(config))
 	if err == nil {
 		t.Fatal("expected error for unclosed quote in run")
 	}
@@ -229,7 +229,7 @@ func TestLoadCompactBackendsInvalidRun(t *testing.T) {
 
 func TestLoadCompactBackendsEmptyRun(t *testing.T) {
 	config := `{"bad": {"run": ""}}`
-	_, err := loadCompactBackends([]byte(config))
+	_, err := loadConfigBackends([]byte(config))
 	if err == nil {
 		t.Fatal("expected error for empty run command")
 	}

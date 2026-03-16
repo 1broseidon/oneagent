@@ -144,8 +144,8 @@ func tokenizeRune(r rune, inSingle, inDouble bool, cur *strings.Builder, args *[
 	return inSingle, inDouble
 }
 
-// loadCompactBackends unmarshals the config as compact format and compiles each entry.
-func loadCompactBackends(data []byte) (map[string]Backend, error) {
+// loadConfigBackends unmarshals the config and compiles each entry.
+func loadConfigBackends(data []byte) (map[string]Backend, error) {
 	var raw map[string]backendConfig
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("invalid backends config: %w", err)
