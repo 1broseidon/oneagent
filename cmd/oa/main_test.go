@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,24 +30,24 @@ func TestThreadCompactUsesExplicitConfigPath(t *testing.T) {
 		t.Fatalf("save thread: %v", err)
 	}
 
-	backends := map[string]oneagent.Backend{
-		"summ": {
-			Cmd:     []string{"sh", "-c", "printf '%s\n' '{\"result\":\"summary\",\"session\":\"\"}'"},
-			Format:  "json",
-			Result:  "result",
-			Session: "session",
-		},
-	}
 	configDir := filepath.Join(home, "custom")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
 	}
 	configPath := filepath.Join(configDir, "backends.json")
-	data, err := json.Marshal(backends)
-	if err != nil {
-		t.Fatalf("marshal backends: %v", err)
-	}
-	if err := os.WriteFile(configPath, data, 0o644); err != nil {
+	// Write a helper script that emits deterministic JSON.
+	scriptPath := filepath.Join(home, "summarize.sh")
+	os.WriteFile(scriptPath, []byte("#!/bin/sh\necho '{\"result\":\"summary\",\"session\":\"\"}'"), 0o755)
+
+	configJSON := []byte(`{
+		"summ": {
+			"run": "` + scriptPath + `",
+			"format": "json",
+			"result": "result",
+			"session": "session"
+		}
+	}`)
+	if err := os.WriteFile(configPath, configJSON, 0o644); err != nil {
 		t.Fatalf("write backends: %v", err)
 	}
 

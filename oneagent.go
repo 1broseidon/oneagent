@@ -1,9 +1,10 @@
 // Package oneagent provides a config-driven interface for running any AI agent CLI.
 //
-// Backends are defined in a JSON config with command templates, output format
-// (json/jsonl), and field paths for extracting results, sessions, and errors.
-// Template variables ({prompt}, {model}, {cwd}, {session}) are substituted at
-// runtime. This lets you add new agent backends without writing any code.
+// Backends are defined in a compact JSON config with run/resume command strings,
+// output format (json/jsonl), and field paths for extracting results, sessions,
+// and errors. Template variables ({prompt}, {model}, {cwd}, {session}) are
+// substituted at runtime. This lets you add new agent backends without writing
+// any code.
 package oneagent
 
 import (
@@ -18,19 +19,20 @@ import (
 )
 
 // Backend defines how to invoke and parse output from an agent CLI.
+// Populated by compiling a backendConfig from the JSON config file.
 type Backend struct {
-	Cmd          []string `json:"cmd"`
-	ResumeCmd    []string `json:"resume_cmd,omitempty"`
-	SystemPrompt string   `json:"system_prompt,omitempty"`
-	Format       string   `json:"format"` // "json" or "jsonl"
-	Result       string   `json:"result"`
-	ResultWhen   string   `json:"result_when,omitempty"`
-	ResultAppend bool     `json:"result_append,omitempty"`
-	Session      string   `json:"session"`
-	SessionWhen  string   `json:"session_when,omitempty"`
-	Error        string   `json:"error,omitempty"`
-	ErrorWhen    string   `json:"error_when,omitempty"`
-	DefaultModel string   `json:"default_model,omitempty"`
+	Cmd          []string
+	ResumeCmd    []string
+	SystemPrompt string
+	Format       string // "json" or "jsonl"
+	Result       string
+	ResultWhen   string
+	ResultAppend bool
+	Session      string
+	SessionWhen  string
+	Error        string
+	ErrorWhen    string
+	DefaultModel string
 }
 
 // Response is the normalized output from any backend.
@@ -58,17 +60,14 @@ func ConfigDir() string {
 	return filepath.Join(home, ".config", "oneagent")
 }
 
-// LoadBackends reads backend definitions from a JSON file.
+// LoadBackends reads backend definitions from a JSON file and compiles the
+// compact config format into canonical Backend structs.
 func LoadBackends(path string) (map[string]Backend, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	var backends map[string]Backend
-	if err := json.Unmarshal(data, &backends); err != nil {
-		return nil, fmt.Errorf("invalid backends config: %w", err)
-	}
-	return backends, nil
+	return loadCompactBackends(data)
 }
 
 // Run executes a prompt against the specified backend and returns a normalized response.

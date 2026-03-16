@@ -92,19 +92,19 @@ Create `~/.config/oneagent/backends.json`:
 ```json
 {
   "claude": {
-    "cmd": ["claude", "-p", "{prompt}", "--model", "{model}", "--output-format", "json"],
-    "resume_cmd": ["claude", "-p", "{prompt}", "--resume", "{session}", "--model", "{model}", "--output-format", "json"],
-    "system_prompt": "You are a helpful assistant.",
+    "run": "claude -p {prompt} --model {model} --output-format json",
+    "resume": "+ --resume {session}",
+    "system": "You are a helpful assistant.",
     "format": "json",
     "result": "result",
     "session": "session_id",
     "error": "result",
     "error_when": "is_error=true",
-    "default_model": "sonnet"
+    "model": "sonnet"
   },
   "codex": {
-    "cmd": ["codex", "exec", "{prompt}", "--json", "--full-auto", "-C", "{cwd}"],
-    "resume_cmd": ["codex", "exec", "resume", "{session}", "{prompt}", "--json", "--full-auto"],
+    "run": "codex exec {prompt} --json --full-auto -C {cwd}",
+    "resume": "codex exec resume {session} {prompt} --json --full-auto",
     "format": "jsonl",
     "result": "item.text",
     "result_when": "type=item.completed",
@@ -120,9 +120,9 @@ Create `~/.config/oneagent/backends.json`:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `cmd` | yes | Command template as array. Variables: `{prompt}`, `{model}`, `{cwd}`, `{session}` |
-| `resume_cmd` | no | Alternate template used when resuming a session |
-| `system_prompt` | no | Prepended to prompt on first message (no active session) |
+| `run` | yes | Command template as a string. Variables: `{prompt}`, `{model}`, `{cwd}`, `{session}` |
+| `resume` | no | Resume command as a full string, or a patch like `+ --resume {session}` inserted after `{prompt}` |
+| `system` | no | Prepended to prompt on first message (no active session) |
 | `format` | yes | Output format: `json` (single object) or `jsonl` (line-delimited events) |
 | `result` | yes | Dot-path to result text (e.g. `result`, `item.text`, `assistantMessageEvent.delta`) |
 | `result_when` | no | Match condition for jsonl (e.g. `type=item.completed`). Supports `&` for AND |
@@ -131,11 +131,15 @@ Create `~/.config/oneagent/backends.json`:
 | `session_when` | no | Match condition for jsonl session events |
 | `error` | no | Dot-path to error message |
 | `error_when` | no | Match condition for error events |
-| `default_model` | no | Fallback model when none specified |
+| `model` | no | Fallback model when none specified |
 
 ### Template variables
 
 When a variable resolves to empty, both the variable and its preceding flag are dropped. So `--model {model}` cleanly disappears when no model is set, letting the backend use its own default.
+
+### Command strings
+
+`run` and `resume` are tokenized into argv without invoking a shell. Quotes and backslash escapes are supported for readability, but commands are still executed directly.
 
 ### Match conditions
 
