@@ -52,6 +52,22 @@ oa thread compact auth-fix
 
 Works out of the box if `claude`, `codex`, `opencode`, or `pi` is installed and signed in.
 
+## Agent-as-tool
+
+`oa` works as a dispatch layer for agents that want to delegate work to other agents. An outer agent (e.g., Claude Code) can run `oa` as a background task to send a targeted edit to a different model, then inspect the diff when it's done:
+
+```sh
+# From inside an agent session — dispatch a file edit to gpt-5.4 via Pi
+oa -b pi -m openai-codex/gpt-5.4 "Edit internal/auth/handler.go: add rate limiting to Login" --jsonl
+
+# Verify the result
+git diff internal/auth/handler.go
+```
+
+The normalized output means the outer agent can parse results from any backend without special handling. Portable threads let you chain follow-ups across models.
+
+An [agent skill](./skills/oa-dispatch/) is included for agents that support the [Agent Skills](https://agentskills.io) format.
+
 ## Output
 
 By default, `oa` prints plain text:
@@ -176,6 +192,7 @@ Any CLI that outputs JSON or line-delimited JSON can be added via [config](./doc
 - [Go library guide](./docs/library.md)
 - [Backend config reference](./docs/config.md)
 - [Integration example](./docs/examples/consumer.md)
+- [Agent skill for dispatch](./skills/oa-dispatch/)
 
 ## License
 
