@@ -11,6 +11,14 @@ Config-driven multi-agent CLI.
 
 ## Install
 
+Homebrew, after the tap repo is created and the first tagged release is published:
+
+```sh
+brew install --cask 1broseidon/tap/oa
+```
+
+Or install directly with Go:
+
 ```sh
 go install github.com/1broseidon/oneagent/cmd/oa@latest
 ```
@@ -196,6 +204,7 @@ Any CLI that outputs JSON or line-delimited JSON can be added via [config](./doc
 - [Go library guide](./docs/library.md)
 - [Backend config reference](./docs/config.md)
 - [Integration example](./docs/examples/consumer.md)
+- [Release and distribution guide](./docs/release.md)
 - [Agent skill for dispatch](./skills/oa-dispatch/)
 
 ## License

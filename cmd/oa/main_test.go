@@ -339,3 +339,16 @@ func TestJSONLAliasOutputsNormalizedJSONL(t *testing.T) {
 		t.Fatalf("oa --jsonl output missing expected stream events:\n%s", text)
 	}
 }
+
+func TestVersionFlagOutputsBuildVersion(t *testing.T) {
+	cmd := exec.Command("go", "run", "-ldflags", "-X main.version=v1.2.3", ".", "--version")
+	cmd.Dir = "."
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("oa --version should succeed, got err=%v output=%s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); got != "oa v1.2.3" {
+		t.Fatalf("oa --version output = %q, want %q", got, "oa v1.2.3")
+	}
+}

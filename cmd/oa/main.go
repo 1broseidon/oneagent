@@ -66,6 +66,10 @@ func main() {
 		usage()
 		return
 	}
+	if args[0] == "-v" || args[0] == "--version" || args[0] == "version" {
+		fmt.Printf("oa %s\n", buildVersion())
+		return
+	}
 
 	if args[0] == "list" {
 		args, configPath := parseConfigArgs(args[1:], "")
@@ -347,6 +351,7 @@ func usage() {
 
 Usage:
   oa [flags] <prompt>
+  oa version                     Show binary version
   oa list                        List configured backends
   oa thread list                 List threads
   oa thread show <id>            Show thread contents
@@ -356,6 +361,7 @@ Flags:
   -b, --backend <name>           Backend to use (default: claude)
   -m, --model <model>            Model override
   -C, --cwd <dir>                Working directory
+  -v, --version                  Show binary version
   --json                         Emit machine-readable JSON output
   --jsonl                        Alias for --stream --json
   -s, --session <id>             Resume session (mutually exclusive with -t)

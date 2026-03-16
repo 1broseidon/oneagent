@@ -1,0 +1,69 @@
+version: 2
+
+project_name: oa
+
+builds:
+  - id: oa
+    main: ./cmd/oa
+    binary: oa
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: oa
+    ids:
+      - oa
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+
+homebrew_casks:
+  - name: oa
+    ids:
+      - oa
+    repository:
+      owner: 1broseidon
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Casks
+    commit_author:
+      name: github-actions[bot]
+      email: 41898282+github-actions[bot]@users.noreply.github.com
+    commit_msg_template: "cask: update oa to {{ .Tag }}"
+    homepage: https://github.com/1broseidon/oneagent
+    description: Config-driven multi-agent CLI with a normalized interface
+    license: MIT
+    binaries:
+      - oa
+    url:
+      verified: github.com/1broseidon/oneagent/

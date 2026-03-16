@@ -2,6 +2,14 @@
 
 All notable changes to oneagent are documented here.
 
+## [0.10.0] - 2026-03-16
+
+### Added
+
+- GoReleaser configuration and a tag-driven GitHub Actions release workflow.
+- Homebrew tap publishing configuration targeting `1broseidon/homebrew-tap`.
+- `oa --version` and `oa version` for release verification and package-manager smoke tests.
+
 ## [0.9.0] - 2026-03-16
 
 ### Added
