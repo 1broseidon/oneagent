@@ -2,7 +2,7 @@
 
 One interface for every AI coding agent. Config-driven, zero code changes to add new backends.
 
-`oa` wraps any agent CLI (Claude, Codex, Cursor, OpenCode, Cline, Pi, ...) behind one interface. The CLI defaults to human-friendly text output, with `--json` for final machine-readable output and `--stream --json` for normalized JSONL events. Define backends in a config file with command templates, output parsing rules, and session support. Add new agents by editing a JSON file — no code required.
+`oa` wraps any agent CLI (Claude, Codex, Cursor, OpenCode, Cline, Pi, ...) behind one interface. The CLI defaults to human-friendly text output, with `--json` for final machine-readable output and `--stream --json` or `--jsonl` for normalized JSONL events. Define backends in a config file with command templates, output parsing rules, and session support. Add new agents by editing a JSON file — no code required.
 
 ## Install
 
@@ -27,6 +27,9 @@ oa --stream "review the repo"
 
 # Normalized JSONL stream
 oa --stream --json "review the repo"
+
+# Shortcut for normalized JSONL stream
+oa --jsonl "review the repo"
 
 # Start or continue a portable thread
 oa -t auth-fix "investigate the failing auth tests"
@@ -88,7 +91,7 @@ With `--stream`, `oa` prints a human-friendly live stream:
 OK
 ```
 
-With `--stream --json`, output is normalized JSONL:
+With `--stream --json` or `--jsonl`, output is normalized JSONL:
 
 ```json
 {"type":"session","backend":"claude","session":"abc123-def456"}

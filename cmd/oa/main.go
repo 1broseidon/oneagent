@@ -37,6 +37,10 @@ func parseArgs(args []string) cliOpts {
 		case "--json":
 			o.json = true
 			continue
+		case "--jsonl":
+			o.json = true
+			o.stream = true
+			continue
 		case "--text":
 			o.text = true
 			continue
@@ -348,11 +352,12 @@ Usage:
   oa thread show <id>            Show thread contents
   oa thread compact <id> [-b]    Summarize old turns
 
-Flags:
+	Flags:
   -b, --backend <name>           Backend to use (default: claude)
   -m, --model <model>            Model override
   -C, --cwd <dir>                Working directory
   --json                         Emit machine-readable JSON output
+  --jsonl                        Alias for --stream --json
   -s, --session <id>             Resume session (mutually exclusive with -t)
   --text                         Emit plain text output (default)
   --stream                       Emit normalized JSONL events while running

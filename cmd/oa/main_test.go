@@ -295,3 +295,47 @@ func TestStreamOutputsNormalizedJSONL(t *testing.T) {
 		t.Fatalf("stream output missing done event:\n%s", text)
 	}
 }
+
+func TestJSONLAliasOutputsNormalizedJSONL(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	scriptPath := filepath.Join(home, "stream.sh")
+	script := "#!/bin/sh\n" +
+		"printf '%s\n' '{\"type\":\"session\",\"sid\":\"sess-1\"}'\n" +
+		"printf '%s\n' '{\"type\":\"activity\",\"tool\":{\"name\":\"Read\",\"path\":\"README.md\"}}'\n" +
+		"printf '%s\n' '{\"type\":\"delta\",\"data\":{\"text\":\"hello\"}}'\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	configPath := filepath.Join(home, "backends.json")
+	configJSON := []byte(`{
+		"s": {
+			"run": "` + scriptPath + `",
+			"format": "jsonl",
+			"activity": "{tool.name} {tool.path}",
+			"activity_when": "type=activity",
+			"result": "data.text",
+			"result_when": "type=delta",
+			"result_append": true,
+			"session": "sid",
+			"session_when": "type=session"
+		}
+	}`)
+	if err := os.WriteFile(configPath, configJSON, 0o644); err != nil {
+		t.Fatalf("write backends: %v", err)
+	}
+
+	cmd := exec.Command("go", "run", ".", "--jsonl", "-b", "s", "-c", configPath, "hi")
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("oa --jsonl should succeed, got err=%v output=%s", err, out)
+	}
+
+	text := string(out)
+	if !strings.Contains(text, `"type":"session"`) || !strings.Contains(text, `"type":"done"`) {
+		t.Fatalf("oa --jsonl output missing expected stream events:\n%s", text)
+	}
+}
