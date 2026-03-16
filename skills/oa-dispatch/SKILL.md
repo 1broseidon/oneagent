@@ -1,6 +1,6 @@
 ---
 name: oa-dispatch
-description: Dispatch coding tasks to other AI agents via oneagent (oa). Use when you want to delegate file edits, code generation, reviews, or other scoped tasks to a different model or backend — for example, sending a targeted edit to gpt-5.4 via Pi while continuing your own work.
+description: Dispatch coding tasks to other AI agents via oneagent (oa). Use when you want to delegate file edits, code generation, reviews, or other scoped tasks to a different model or backend — for example, sending a targeted edit to Codex while continuing your own work.
 compatibility: Requires oa CLI (go install github.com/1broseidon/oneagent/cmd/oa@latest) and at least one agent backend (claude, codex, opencode, or pi) installed and signed in.
 ---
 
@@ -28,7 +28,7 @@ oa -b <backend> -m <model> "<prompt>"
 For background execution with streaming visibility:
 
 ```bash
-oa -b pi -m openai-codex/gpt-5.4 "Edit path/to/file.go: <specific instructions>" --jsonl
+oa -b claude "Edit path/to/file.go: <specific instructions>" --jsonl
 ```
 
 ## Constructing effective prompts
@@ -69,8 +69,8 @@ To use a specific model through a backend that supports model routing:
 
 ```bash
 oa -b pi -m openai-codex/gpt-5.4 "prompt"
-oa -b pi -m ollama/llama3.1 "prompt"
-oa -b pi -m anthropic/claude-sonnet-4-6 "prompt"
+oa -b opencode -m ollama/llama3.1 "prompt"
+oa -b claude -m sonnet "prompt"
 ```
 
 Run `oa list` to see all configured backends.
@@ -81,9 +81,10 @@ Run the dispatch as a background task so you can continue working:
 
 ```bash
 # Background with JSONL streaming (can inspect progress)
-oa -b pi -m openai-codex/gpt-5.4 "Edit file.go: add error handling to ProcessOrder" --jsonl &
+oa -b codex "Edit file.go: add error handling to ProcessOrder" --jsonl &
 
-# Or use your agent platform's background task support
+# Or with a specific model via Pi
+oa -b pi -m openai-codex/gpt-5.4 "Edit file.go: add error handling to ProcessOrder" --jsonl &
 ```
 
 After the task completes, verify the changes:
@@ -99,14 +100,14 @@ git diff path/to/file.go
 When a task needs follow-up work, use threads to carry context:
 
 ```bash
-# First pass
-oa -b pi -m openai-codex/gpt-5.4 -t refactor-auth "Refactor internal/auth/handler.go to extract middleware"
+# First pass with Claude
+oa -b claude -t refactor-auth "Refactor internal/auth/handler.go to extract middleware"
 
-# Follow-up on the same thread
-oa -b pi -m openai-codex/gpt-5.4 -t refactor-auth "Now add tests for the extracted middleware"
+# Follow-up on the same thread, different backend
+oa -b codex -t refactor-auth "Now add tests for the extracted middleware"
 ```
 
-Threads are portable — you can switch backends mid-thread if needed.
+Threads are portable — switch backends mid-thread and context carries over automatically.
 
 ## Output modes
 
