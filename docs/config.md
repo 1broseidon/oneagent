@@ -78,13 +78,13 @@ Numeric path segments index into arrays, so `.0.` is valid.
 
 ## Example Backends
 
-These are the embedded defaults that ship with `oa`. Each uses the minimum flags needed for non-interactive execution — no extra permission flags required. Claude's `-p` mode and Codex's `--full-auto` handle permissions automatically. Override any of these in `~/.config/oneagent/backends.json` if you need different flags.
+These are the embedded defaults that ship with `oa`. Each uses the minimum flags needed for non-interactive execution with full tool access. Claude's `-p` mode only allows reads, so `--dangerously-skip-permissions` is required for writes and bash. Codex's `--full-auto` handles sandboxed execution. Pi and OpenCode have no permission restrictions in non-interactive mode. Override any of these in `~/.config/oneagent/backends.json` if you need different flags.
 
 **Claude:**
 
 ```json
 {
-  "run": "claude -p {prompt} --model {model} --output-format stream-json --include-partial-messages --verbose",
+  "run": "claude -p {prompt} --model {model} --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions",
   "resume": "+ --resume {session}",
   "format": "jsonl",
   "activity": "{message.content.0.name} {message.content.0.input.file_path}",
