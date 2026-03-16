@@ -1,6 +1,6 @@
 {
   "claude": {
-    "run": "claude -p {prompt} --model {model} --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions",
+    "run": "claude -p {prompt} --model {model} --output-format stream-json --include-partial-messages --verbose",
     "resume": "+ --resume {session}",
     "format": "jsonl",
     "activity": "{message.content.0.name} {message.content.0.input.file_path}",
