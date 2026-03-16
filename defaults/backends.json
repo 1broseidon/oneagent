@@ -34,6 +34,8 @@
     "run": "opencode run {prompt} --format json --dir {cwd} --model {model}",
     "resume": "+ --session {session}",
     "format": "jsonl",
+    "activity": "{part.tool} {part.state.input.filePath}",
+    "activity_when": "type=tool_use",
     "result": "part.text",
     "result_when": "type=text",
     "session": "sessionID",
