@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -76,11 +75,11 @@ func (s FilesystemStore) LoadThread(id string) (*Thread, error) {
 		return nil, err
 	}
 	defer f.Close()
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_SH); err != nil {
+	if err := flockShared(f.Fd()); err != nil {
 		return nil, err
 	}
 	defer func() {
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = flockUnlock(f.Fd())
 	}()
 	data, err := io.ReadAll(f)
 	if err != nil {
@@ -122,11 +121,11 @@ func (s FilesystemStore) SaveThread(t *Thread) error {
 		return err
 	}
 	defer f.Close()
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+	if err := flockExcl(f.Fd()); err != nil {
 		return err
 	}
 	defer func() {
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = flockUnlock(f.Fd())
 	}()
 	if err := f.Truncate(0); err != nil {
 		return err
