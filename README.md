@@ -6,12 +6,17 @@ Config-driven multi-agent CLI.
 
 ## Prerequisites
 
-- [Go 1.21+](https://go.dev/dl/) (for install via `go install`)
 - At least one supported agent CLI installed and signed in (e.g., `claude`, `codex`, `opencode`, or `pi`)
 
 ## Install
 
-Go install:
+Homebrew:
+
+```sh
+brew install 1broseidon/tap/oa
+```
+
+Or with Go:
 
 ```sh
 go install github.com/1broseidon/oneagent/cmd/oa@latest

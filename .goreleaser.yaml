@@ -46,24 +46,21 @@ changelog:
       - "^chore:"
       - "^ci:"
 
-homebrew_casks:
-  - name: oa
-    ids:
+brews:
+  - ids:
       - oa
     repository:
       owner: 1broseidon
       name: homebrew-tap
       branch: main
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    directory: Casks
+    directory: Formula
     commit_author:
       name: github-actions[bot]
       email: 41898282+github-actions[bot]@users.noreply.github.com
-    commit_msg_template: "cask: update oa to {{ .Tag }}"
+    commit_msg_template: "formula: update oa to {{ .Tag }}"
     homepage: https://github.com/1broseidon/oneagent
     description: Config-driven multi-agent CLI with a normalized interface
     license: MIT
-    binaries:
-      - oa
-    url:
-      verified: github.com/1broseidon/oneagent/
+    install: |
+      bin.install "oa"
