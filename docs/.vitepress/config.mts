@@ -5,6 +5,7 @@ export default defineConfig({
   description: 'Config-driven multi-agent CLI',
   base: '/oneagent/',
   appearance: false,
+  cleanUrls: true,
   head: [
     ['link', { rel: 'preconnect', href: 'https://fonts.googleapis.com' }],
     ['link', { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' }],
