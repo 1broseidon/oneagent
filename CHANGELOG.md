@@ -2,6 +2,12 @@
 
 All notable changes to oneagent are documented here.
 
+## [0.10.3] - 2026-03-17
+
+### Fixed
+
+- Codex backend now uses `--dangerously-bypass-approvals-and-sandbox` instead of `--full-auto` — bubblewrap sandbox fails on some kernels, blocking all writes.
+
 ## [0.10.2] - 2026-03-17
 
 ### Added
