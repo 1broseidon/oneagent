@@ -4,7 +4,7 @@ export default defineConfig({
   title: 'oneagent',
   description: 'Config-driven multi-agent CLI',
   base: '/oneagent/',
-  appearance: 'dark',
+  appearance: false,
   head: [
     ['link', { rel: 'preconnect', href: 'https://fonts.googleapis.com' }],
     ['link', { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' }],
