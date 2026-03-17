@@ -226,6 +226,7 @@ Any CLI that outputs JSON or line-delimited JSON can be added via [config](./doc
 - [Backend config reference](./docs/config.md)
 - [Integration example](./docs/examples/consumer.md)
 - [Agent skill for dispatch](./skills/oa-dispatch/)
+- [Troubleshooting](./docs/troubleshooting.md)
 
 ## License
 

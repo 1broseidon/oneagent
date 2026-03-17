@@ -70,9 +70,10 @@ func TestThreadCompactUsesExplicitConfigPath(t *testing.T) {
 	}
 }
 
-func TestBackendProgramHandlesEmptyCmd(t *testing.T) {
-	if got := backendProgram(oneagent.Backend{}); got != "(invalid)" {
-		t.Fatalf("backendProgram(empty) = %q, want %q", got, "(invalid)")
+func TestResolveBackendProgramHandlesEmptyCmd(t *testing.T) {
+	name, found := oneagent.ResolveBackendProgram(oneagent.Backend{})
+	if name != "(invalid)" || found {
+		t.Fatalf("ResolveBackendProgram(empty) = %q, %v; want %q, false", name, found, "(invalid)")
 	}
 }
 

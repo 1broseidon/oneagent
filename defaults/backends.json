@@ -13,11 +13,13 @@
     "session_when": "type=system",
     "error": "result",
     "error_when": "type=result&is_error=true",
-    "model": "sonnet"
+    "model": "sonnet",
+    "paths": ["~/.claude/local", "~/.local/bin", "~/.npm-global/bin"]
   },
   "codex": {
     "run": "codex exec {prompt} --json --dangerously-bypass-approvals-and-sandbox -C {cwd} --skip-git-repo-check",
     "resume": "codex exec resume {session} {prompt} --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check",
+    "paths": ["~/.local/bin", "~/.npm-global/bin"],
     "format": "jsonl",
     "activity": "{item.command}",
     "activity_when": "type=item.started&item.type=command_execution",
@@ -41,7 +43,8 @@
     "session": "sessionID",
     "session_when": "type=step_start",
     "error": "part.text",
-    "error_when": "type=error"
+    "error_when": "type=error",
+    "paths": ["~/.opencode/bin", "~/.local/bin"]
   },
   "pi": {
     "run": "pi -p {prompt} --mode json --model {model}",
@@ -55,6 +58,7 @@
     "session": "id",
     "session_when": "type=session",
     "error": "message",
-    "error_when": "type=error"
+    "error_when": "type=error",
+    "paths": ["~/.local/bin", "~/.npm-global/bin"]
   }
 }

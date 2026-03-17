@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/1broseidon/oneagent"
@@ -335,24 +334,21 @@ func listBackends(configPath string) {
 		os.Exit(1)
 	}
 	for name, b := range backends {
-		prog := backendProgram(b)
+		_, found := oneagent.ResolveBackendProgram(b)
 		model := b.DefaultModel
 		if model == "" {
-			model = "(default)"
+			model = ""
 		}
 		status := ""
-		if _, err := exec.LookPath(prog); err != nil {
+		if !found {
 			status = " (not installed)"
 		}
-		fmt.Printf("%-12s %s format=%s model=%s%s\n", name, prog, b.Format, model, status)
+		if model != "" {
+			fmt.Printf("%-12s model=%s%s\n", name, model, status)
+		} else {
+			fmt.Printf("%-12s%s\n", name, status)
+		}
 	}
-}
-
-func backendProgram(b oneagent.Backend) string {
-	if len(b.Cmd) == 0 || b.Cmd[0] == "" {
-		return "(invalid)"
-	}
-	return b.Cmd[0]
 }
 
 func usage() {

@@ -8,22 +8,23 @@ import (
 
 // backendConfig is the JSON config format that compiles into Backend.
 type backendConfig struct {
-	Run          string `json:"run"`
-	Resume       string `json:"resume,omitempty"`
-	Model        string `json:"model,omitempty"`
-	System       string `json:"system,omitempty"`
-	Format       string `json:"format,omitempty"`
-	Activity     string `json:"activity,omitempty"`
-	ActivityWhen string `json:"activity_when,omitempty"`
-	Delta        string `json:"delta,omitempty"`
-	DeltaWhen    string `json:"delta_when,omitempty"`
-	Result       string `json:"result,omitempty"`
-	ResultWhen   string `json:"result_when,omitempty"`
-	ResultAppend bool   `json:"result_append,omitempty"`
-	Session      string `json:"session,omitempty"`
-	SessionWhen  string `json:"session_when,omitempty"`
-	Error        string `json:"error,omitempty"`
-	ErrorWhen    string `json:"error_when,omitempty"`
+	Run          string   `json:"run"`
+	Resume       string   `json:"resume,omitempty"`
+	Model        string   `json:"model,omitempty"`
+	System       string   `json:"system,omitempty"`
+	Format       string   `json:"format,omitempty"`
+	Activity     string   `json:"activity,omitempty"`
+	ActivityWhen string   `json:"activity_when,omitempty"`
+	Delta        string   `json:"delta,omitempty"`
+	DeltaWhen    string   `json:"delta_when,omitempty"`
+	Result       string   `json:"result,omitempty"`
+	ResultWhen   string   `json:"result_when,omitempty"`
+	ResultAppend bool     `json:"result_append,omitempty"`
+	Session      string   `json:"session,omitempty"`
+	SessionWhen  string   `json:"session_when,omitempty"`
+	Error        string   `json:"error,omitempty"`
+	ErrorWhen    string   `json:"error_when,omitempty"`
+	Paths        []string `json:"paths,omitempty"`
 }
 
 // compileBackend converts a backendConfig into the canonical Backend struct.
@@ -43,6 +44,7 @@ func compileBackend(c backendConfig) (Backend, error) {
 		Error:        c.Error,
 		ErrorWhen:    c.ErrorWhen,
 		DefaultModel: c.Model,
+		Paths:        c.Paths,
 	}
 
 	if err := compileCommands(&b, c); err != nil {

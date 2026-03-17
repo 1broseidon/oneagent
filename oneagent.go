@@ -11,6 +11,7 @@ import (
 	"bufio"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -38,6 +39,7 @@ type Backend struct {
 	Error        string
 	ErrorWhen    string
 	DefaultModel string
+	Paths        []string // additional directories to search for the CLI binary
 }
 
 // Response is the normalized output from any backend.
@@ -168,7 +170,8 @@ func buildCmd(b Backend, opts RunOpts) (*exec.Cmd, error) {
 		return nil, fmt.Errorf("backend %q produced an empty command", opts.Backend)
 	}
 
-	cmd := exec.Command(args[0], args[1:]...)
+	prog := resolveProgram(args[0], b.Paths)
+	cmd := exec.Command(prog, args[1:]...)
 	if opts.CWD != "" && !containsVar(b.Cmd, "{cwd}") {
 		cmd.Dir = opts.CWD
 	}
@@ -221,7 +224,9 @@ func (c Client) run(opts RunOpts, emit func(StreamEvent)) Response {
 	resp := Response{Result: result, Session: session, Backend: opts.Backend}
 	if err != nil {
 		log.Printf("%s error: %v", opts.Backend, err)
-		if result != "" {
+		if errors.Is(err, exec.ErrNotFound) {
+			resp.Error = fmt.Sprintf("%q not found in PATH. Is %s installed? See https://github.com/1broseidon/oneagent/blob/main/docs/troubleshooting.md", cmd.Path, opts.Backend)
+		} else if result != "" {
 			resp.Error = result
 		} else {
 			resp.Error = err.Error()
@@ -253,6 +258,42 @@ func substArgs(tmpl []string, vars map[string]string) []string {
 		out = append(out, val)
 	}
 	return out
+}
+
+// resolveProgram finds a program binary. It checks $PATH first, then falls back
+// to the extra directories listed in paths. Tilde (~) is expanded to $HOME.
+// Returns the original name if nothing is found, letting exec.Command produce
+// the standard "not found" error.
+func resolveProgram(name string, paths []string) string {
+	if p, err := exec.LookPath(name); err == nil {
+		return p
+	}
+	home, _ := os.UserHomeDir()
+	for _, dir := range paths {
+		if strings.HasPrefix(dir, "~/") && home != "" {
+			dir = filepath.Join(home, dir[2:])
+		}
+		candidate := filepath.Join(dir, name)
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return name
+}
+
+// ResolveBackendProgram returns the resolved path for a backend's CLI binary,
+// checking $PATH first, then the backend's configured paths.
+// Returns the program name and whether it was found.
+func ResolveBackendProgram(b Backend) (string, bool) {
+	if len(b.Cmd) == 0 || b.Cmd[0] == "" {
+		return "(invalid)", false
+	}
+	resolved := resolveProgram(b.Cmd[0], b.Paths)
+	if filepath.IsAbs(resolved) {
+		return resolved, true
+	}
+	// resolveProgram returned the bare name — not found
+	return b.Cmd[0], false
 }
 
 func containsVar(tmpl []string, v string) bool {
