@@ -2,6 +2,14 @@
 
 All notable changes to oneagent are documented here.
 
+## [0.10.6] - 2026-03-17
+
+### Added
+
+- Stdin pipe support — pipe content into `oa` as context, with optional positional args as instructions. Examples: `cat file.go | oa -b claude "review this"`, `git diff | oa -b claude "explain these changes"`.
+- `oa backends` alias for `oa list`.
+- Docs site now auto-rebuilds after every release so the version badge stays current.
+
 ## [0.10.5] - 2026-03-17
 
 ### Added

@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - 'docs/**'
+  workflow_run:
+    workflows: [release]
+    types: [completed]
 
 permissions:
   contents: write
@@ -12,8 +15,13 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 24

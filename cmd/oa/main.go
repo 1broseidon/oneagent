@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -73,7 +74,7 @@ func main() {
 		return
 	}
 
-	if args[0] == "list" {
+	if args[0] == "list" || args[0] == "backends" {
 		args, configPath := parseConfigArgs(args[1:], "")
 		if len(args) != 0 {
 			fmt.Fprintln(os.Stderr, "usage: oa list [-c config]")
@@ -93,9 +94,34 @@ func main() {
 }
 
 func runPrompt(o cliOpts) {
+	o = readStdin(o)
 	validateRunPrompt(o)
 	backends, opts := loadRunContext(o)
 	dispatchPrompt(backends, opts, o)
+}
+
+// readStdin reads from stdin when it's a pipe and combines it with any
+// positional prompt args. Pipe content becomes context, args become instructions.
+func readStdin(o cliOpts) cliOpts {
+	info, err := os.Stdin.Stat()
+	if err != nil {
+		return o
+	}
+	if info.Mode()&os.ModeCharDevice != 0 {
+		return o // stdin is a terminal, not a pipe
+	}
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil || len(data) == 0 {
+		return o
+	}
+	piped := strings.TrimSpace(string(data))
+	if len(o.prompt) > 0 {
+		// args are instructions, stdin is context
+		o.prompt = []string{piped + "\n\n" + strings.Join(o.prompt, " ")}
+	} else {
+		o.prompt = []string{piped}
+	}
+	return o
 }
 
 func validateRunPrompt(o cliOpts) {
