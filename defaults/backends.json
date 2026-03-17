@@ -16,8 +16,8 @@
     "model": "sonnet"
   },
   "codex": {
-    "run": "codex exec {prompt} --json --full-auto -C {cwd} --skip-git-repo-check",
-    "resume": "codex exec resume {session} {prompt} --json --full-auto --skip-git-repo-check",
+    "run": "codex exec {prompt} --json --dangerously-bypass-approvals-and-sandbox -C {cwd} --skip-git-repo-check",
+    "resume": "codex exec resume {session} {prompt} --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check",
     "format": "jsonl",
     "activity": "{item.command}",
     "activity_when": "type=item.started&item.type=command_execution",
