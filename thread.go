@@ -3,9 +3,13 @@ package oneagent
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -14,6 +18,7 @@ type Turn struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 	Backend string `json:"backend"`
+	Source  string `json:"source,omitempty"`
 	TS      string `json:"ts"`
 }
 
@@ -63,10 +68,21 @@ func (c Client) LoadThread(id string) (*Thread, error) {
 // LoadThread reads a thread from the filesystem store. A missing file returns an empty thread.
 func (s FilesystemStore) LoadThread(id string) (*Thread, error) {
 	path := filepath.Join(s.dir(), id+".json")
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if os.IsNotExist(err) {
 		return &Thread{ID: id, NativeSessions: map[string]string{}}, nil
 	}
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_SH); err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	}()
+	data, err := io.ReadAll(f)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +116,28 @@ func (s FilesystemStore) SaveThread(t *Thread) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, t.ID+".json"), data, 0o644)
+	path := filepath.Join(dir, t.ID+".json")
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	defer func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	}()
+	if err := f.Truncate(0); err != nil {
+		return err
+	}
+	if _, err := f.Seek(0, 0); err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		return err
+	}
+	return f.Sync()
 }
 
 // CompileContext builds a context string from the thread's history within a byte budget.
@@ -171,14 +208,14 @@ func prepareThreadPrompt(thread *Thread, opts *RunOpts) string {
 }
 
 // recordTurns appends the user prompt and assistant response to the thread.
-func (t *Thread) recordTurns(original string, resp Response) {
+func (t *Thread) recordTurns(original string, resp Response, source string) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	t.Turns = append(t.Turns,
-		Turn{Role: "user", Content: original, Backend: resp.Backend, TS: now},
+		Turn{Role: "user", Content: original, Backend: resp.Backend, Source: source, TS: now},
 	)
 	if resp.Result != "" && resp.Error == "" {
 		t.Turns = append(t.Turns,
-			Turn{Role: "assistant", Content: resp.Result, Backend: resp.Backend, TS: now},
+			Turn{Role: "assistant", Content: resp.Result, Backend: resp.Backend, Source: source, TS: now},
 		)
 	}
 	if resp.Session != "" {
@@ -234,12 +271,48 @@ func (c Client) runWithThread(opts RunOpts, emit func(StreamEvent)) Response {
 		resp.Error = "thread save failed: " + streamSaveErr.Error()
 	}
 
-	thread.recordTurns(original, resp)
+	thread.recordTurns(original, resp, opts.Source)
 	if err := c.threadStore().SaveThread(thread); err != nil {
 		resp.Error = "thread save failed: " + err.Error()
 	}
 	resp.ThreadID = opts.ThreadID
+	runOnCompleteHook(opts, resp)
 	return resp
+}
+
+func runOnCompleteHook(opts RunOpts, resp Response) {
+	if opts.OnComplete == "" || resp.Error != "" {
+		return
+	}
+
+	args, err := tokenize(opts.OnComplete)
+	if err != nil {
+		log.Printf("on-complete hook tokenize failed: %v", err)
+		return
+	}
+	if len(args) == 0 {
+		log.Printf("on-complete hook command is empty")
+		return
+	}
+
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Stdin = strings.NewReader(resp.Result)
+	cmd.Env = append(os.Environ(),
+		"OA_THREAD_ID="+opts.ThreadID,
+		"OA_BACKEND="+resp.Backend,
+		"OA_SESSION="+resp.Session,
+		"OA_SOURCE="+opts.Source,
+	)
+
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if s := strings.TrimSpace(stderr.String()); s != "" {
+			log.Printf("on-complete hook failed: %v: %s", err, s)
+			return
+		}
+		log.Printf("on-complete hook failed: %v", err)
+	}
 }
 
 // CompactThread summarizes old turns using a backend, keeping the last keepTurns.

@@ -102,6 +102,7 @@ resp := client.RunWithThread(oneagent.RunOpts{
 	ThreadID: "auth-fix",
 	Prompt:   "continue debugging",
 	CWD:      "/path/to/project",
+	Source:   "my-app",  // tags turns with who produced them
 })
 ```
 
@@ -110,6 +111,8 @@ This gives you:
 - Native session reuse when continuing on the same backend
 - Automatic context replay when switching to a different backend
 - Local thread storage with compaction to keep long conversations manageable
+- File locking — safe for multiple processes to share a thread concurrently
+- Turn attribution — each turn records its `Source` so you can distinguish bot, cron, and user turns
 
 Thread management:
 
@@ -140,6 +143,22 @@ type Store interface {
 	ListThreads() ([]string, error)
 }
 ```
+
+## Post-Run Hooks
+
+Use `OnComplete` to run a command after a thread turn completes. The result is piped to stdin:
+
+```go
+resp := client.RunWithThread(oneagent.RunOpts{
+	Backend:    "claude",
+	ThreadID:   "daily-review",
+	Prompt:     "summarize today",
+	Source:     "cron-nightly",
+	OnComplete: "curl -s -X POST https://hooks.example.com/notify -d @-",
+})
+```
+
+The hook receives environment variables `OA_THREAD_ID`, `OA_BACKEND`, `OA_SESSION`, and `OA_SOURCE`. Hooks are best-effort — failures are logged but don't affect the response.
 
 ## Typical Integration Pattern
 

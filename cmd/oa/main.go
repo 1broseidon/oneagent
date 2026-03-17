@@ -19,6 +19,7 @@ type cliOpts struct {
 	stream     bool
 	thread     string
 	configPath string
+	onComplete string
 	prompt     []string
 }
 
@@ -31,6 +32,7 @@ func parseArgs(args []string) cliOpts {
 		"-s": &o.session, "--session": &o.session,
 		"-t": &o.thread, "--thread": &o.thread,
 		"-c": &o.configPath, "--config": &o.configPath,
+		"--on-complete": &o.onComplete,
 	}
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -124,12 +126,13 @@ func loadRunContext(o cliOpts) (map[string]oneagent.Backend, oneagent.RunOpts) {
 	}
 
 	opts := oneagent.RunOpts{
-		Backend:   backend,
-		Prompt:    strings.Join(o.prompt, " "),
-		Model:     o.model,
-		CWD:       o.cwd,
-		SessionID: o.session,
-		ThreadID:  o.thread,
+		Backend:    backend,
+		Prompt:     strings.Join(o.prompt, " "),
+		Model:      o.model,
+		CWD:        o.cwd,
+		SessionID:  o.session,
+		ThreadID:   o.thread,
+		OnComplete: o.onComplete,
 	}
 	return backends, opts
 }
@@ -364,6 +367,7 @@ Flags:
   -v, --version                  Show binary version
   --json                         Emit machine-readable JSON output
   --jsonl                        Alias for --stream --json
+  --on-complete <cmd>            Run a command after a successful thread turn; result is sent to stdin
   -s, --session <id>             Resume session (mutually exclusive with -t)
   --text                         Emit plain text output (default)
   --stream                       Stream live output while running

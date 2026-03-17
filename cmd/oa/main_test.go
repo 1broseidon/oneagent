@@ -352,3 +352,24 @@ func TestVersionFlagOutputsBuildVersion(t *testing.T) {
 		t.Fatalf("oa --version output = %q, want %q", got, "oa v1.2.3")
 	}
 }
+
+func TestLoadRunContextIncludesOnComplete(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	_, opts := loadRunContext(cliOpts{
+		backend:    "claude",
+		thread:     "daily",
+		onComplete: "echo hook",
+		prompt:     []string{"summarize", "today"},
+	})
+
+	if opts.OnComplete != "echo hook" {
+		t.Fatalf("on_complete = %q, want %q", opts.OnComplete, "echo hook")
+	}
+	if opts.ThreadID != "daily" {
+		t.Fatalf("thread_id = %q, want %q", opts.ThreadID, "daily")
+	}
+	if opts.Prompt != "summarize today" {
+		t.Fatalf("prompt = %q, want %q", opts.Prompt, "summarize today")
+	}
+}

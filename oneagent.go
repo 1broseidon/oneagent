@@ -69,12 +69,14 @@ type Client struct {
 
 // RunOpts configures a single agent invocation.
 type RunOpts struct {
-	Backend   string
-	Prompt    string
-	Model     string
-	CWD       string
-	SessionID string
-	ThreadID  string
+	Backend    string
+	Prompt     string
+	Model      string
+	CWD        string
+	SessionID  string
+	ThreadID   string
+	Source     string
+	OnComplete string
 }
 
 // ConfigDir returns the default config directory (~/.config/oneagent).

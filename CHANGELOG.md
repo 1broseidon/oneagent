@@ -2,6 +2,14 @@
 
 All notable changes to oneagent are documented here.
 
+## [0.10.2] - 2026-03-17
+
+### Added
+
+- File locking on thread storage — `LoadThread` acquires a shared lock, `SaveThread` acquires an exclusive lock, preventing corruption when multiple processes (e.g., a bot and a cron job) access the same thread concurrently.
+- Turn attribution — `Turn.Source` field and `RunOpts.Source` let callers tag who produced a turn (e.g., `"telegram"`, `"cron-nightly"`, `"ci-pipeline"`).
+- Post-run hooks — `RunOpts.OnComplete` and `--on-complete` CLI flag execute a command after a thread turn completes, with the result piped to stdin and `OA_THREAD_ID`, `OA_BACKEND`, `OA_SESSION`, `OA_SOURCE` set as environment variables. Best-effort: hook failures are logged but don't fail the response.
+
 ## [0.10.1] - 2026-03-16
 
 ### Added

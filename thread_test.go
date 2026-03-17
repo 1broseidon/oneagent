@@ -1,7 +1,10 @@
 package oneagent
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -76,7 +79,7 @@ func TestNewThreadCreatesFileAndRecordsTurns(t *testing.T) {
 	setupThreadHome(t)
 
 	backends := map[string]Backend{"a": staticBackend("ok", "sa")}
-	resp := RunWithThread(backends, RunOpts{Backend: "a", Prompt: "first", ThreadID: "t1"})
+	resp := RunWithThread(backends, RunOpts{Backend: "a", Prompt: "first", ThreadID: "t1", Source: "telegram"})
 
 	if resp.ThreadID != "t1" {
 		t.Fatalf("thread_id = %q, want t1", resp.ThreadID)
@@ -101,8 +104,14 @@ func TestNewThreadCreatesFileAndRecordsTurns(t *testing.T) {
 	if thread.Turns[0].Role != "user" || thread.Turns[0].Content != "first" {
 		t.Fatalf("turn[0] = %+v, want user/first", thread.Turns[0])
 	}
+	if thread.Turns[0].Source != "telegram" {
+		t.Fatalf("turn[0].source = %q, want telegram", thread.Turns[0].Source)
+	}
 	if thread.Turns[1].Role != "assistant" {
 		t.Fatalf("turn[1].role = %q, want assistant", thread.Turns[1].Role)
+	}
+	if thread.Turns[1].Source != "telegram" {
+		t.Fatalf("turn[1].source = %q, want telegram", thread.Turns[1].Source)
 	}
 }
 
@@ -220,6 +229,123 @@ func TestRunWithThreadStreamEmitsThreadEventsAndPersistsSession(t *testing.T) {
 	}
 	if len(thread.Turns) != 2 {
 		t.Fatalf("turns = %d, want 2", len(thread.Turns))
+	}
+}
+
+func TestRunWithThreadRunsOnCompleteHook(t *testing.T) {
+	setupThreadHome(t)
+
+	home := os.Getenv("HOME")
+	resultPath := filepath.Join(home, "hook result.txt")
+	envPath := filepath.Join(home, "hook env.txt")
+	scriptPath := filepath.Join(home, "hook.sh")
+	script := "#!/bin/sh\n" +
+		"cat > \"$1\"\n" +
+		"printf 'OA_THREAD_ID=%s\nOA_BACKEND=%s\nOA_SESSION=%s\nOA_SOURCE=%s\n' \"$OA_THREAD_ID\" \"$OA_BACKEND\" \"$OA_SESSION\" \"$OA_SOURCE\" > \"$2\"\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write hook script: %v", err)
+	}
+
+	backends := map[string]Backend{"a": staticBackend("ok", "sa")}
+	resp := RunWithThread(backends, RunOpts{
+		Backend:    "a",
+		Prompt:     "first",
+		ThreadID:   "t-hook",
+		Source:     "telegram",
+		OnComplete: fmt.Sprintf("%s '%s' '%s'", scriptPath, resultPath, envPath),
+	})
+
+	if resp.Error != "" {
+		t.Fatalf("unexpected error: %s", resp.Error)
+	}
+
+	result, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatalf("read hook result: %v", err)
+	}
+	if string(result) != "ok" {
+		t.Fatalf("hook stdin = %q, want ok", string(result))
+	}
+
+	env, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatalf("read hook env: %v", err)
+	}
+	gotEnv := string(env)
+	for _, want := range []string{
+		"OA_THREAD_ID=t-hook",
+		"OA_BACKEND=a",
+		"OA_SESSION=sa",
+		"OA_SOURCE=telegram",
+	} {
+		if !strings.Contains(gotEnv, want) {
+			t.Fatalf("hook env missing %q:\n%s", want, gotEnv)
+		}
+	}
+}
+
+func TestRunWithThreadOnCompleteHookIsBestEffort(t *testing.T) {
+	setupThreadHome(t)
+
+	var logs bytes.Buffer
+	oldWriter := log.Writer()
+	oldFlags := log.Flags()
+	oldPrefix := log.Prefix()
+	log.SetOutput(&logs)
+	log.SetFlags(0)
+	log.SetPrefix("")
+	defer func() {
+		log.SetOutput(oldWriter)
+		log.SetFlags(oldFlags)
+		log.SetPrefix(oldPrefix)
+	}()
+
+	backends := map[string]Backend{"a": staticBackend("ok", "sa")}
+	resp := RunWithThread(backends, RunOpts{
+		Backend:    "a",
+		Prompt:     "first",
+		ThreadID:   "t-hook-fail",
+		OnComplete: "sh -c 'echo hook failed >&2; exit 17'",
+	})
+
+	if resp.Error != "" {
+		t.Fatalf("unexpected error: %s", resp.Error)
+	}
+	if !strings.Contains(logs.String(), "on-complete hook failed") {
+		t.Fatalf("expected hook failure to be logged, got %q", logs.String())
+	}
+}
+
+func TestRunWithThreadSkipsOnCompleteHookOnRunError(t *testing.T) {
+	setupThreadHome(t)
+
+	home := os.Getenv("HOME")
+	markerPath := filepath.Join(home, "hook marker.txt")
+	scriptPath := filepath.Join(home, "marker.sh")
+	script := "#!/bin/sh\ncat > \"$1\"\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write marker script: %v", err)
+	}
+
+	backends := map[string]Backend{
+		"bad": {
+			Cmd:    []string{"sh", "-c", "exit 1"},
+			Format: "json",
+			Result: "result",
+		},
+	}
+	resp := RunWithThread(backends, RunOpts{
+		Backend:    "bad",
+		Prompt:     "boom",
+		ThreadID:   "t-hook-skip",
+		OnComplete: fmt.Sprintf("%s '%s'", scriptPath, markerPath),
+	})
+
+	if resp.Error == "" {
+		t.Fatal("expected run error")
+	}
+	if _, err := os.Stat(markerPath); !os.IsNotExist(err) {
+		t.Fatalf("hook should not have run, stat err = %v", err)
 	}
 }
 
@@ -496,7 +622,7 @@ func TestThreadJSONRoundTrip(t *testing.T) {
 		ID:      "rt",
 		Summary: "sum",
 		Turns: []Turn{
-			{Role: "user", Content: "hi", Backend: "a", TS: "2025-01-01T00:00:00Z"},
+			{Role: "user", Content: "hi", Backend: "a", Source: "cron-nightly", TS: "2025-01-01T00:00:00Z"},
 		},
 		NativeSessions: map[string]string{"a": "s1"},
 	}
@@ -509,6 +635,9 @@ func TestThreadJSONRoundTrip(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if got.ID != "rt" || got.Summary != "sum" || len(got.Turns) != 1 || got.NativeSessions["a"] != "s1" {
+		t.Fatalf("round trip mismatch: %+v", got)
+	}
+	if got.Turns[0].Source != "cron-nightly" {
 		t.Fatalf("round trip mismatch: %+v", got)
 	}
 }
