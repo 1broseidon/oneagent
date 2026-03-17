@@ -51,7 +51,7 @@ const features = [
       <!-- Install -->
       <div class="install-block">
         <span class="install-dollar">$</span>
-        <code>go install github.com/1broseidon/oneagent/cmd/oa@latest</code>
+        <code>brew install 1broseidon/tap/oa</code>
       </div>
 
       <!-- Actions -->
