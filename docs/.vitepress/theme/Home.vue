@@ -1,4 +1,7 @@
 <script setup>
+import { useData } from 'vitepress'
+const { theme } = useData()
+
 const features = [
   {
     title: 'Normalized Output',
@@ -41,6 +44,7 @@ const features = [
       <div class="tagline-row">
         <div class="accent-line"></div>
         <p class="tagline">Config-driven multi-agent CLI</p>
+        <span v-if="theme.version" class="version-tag">{{ theme.version }}</span>
       </div>
       <p class="subtitle">One interface for Claude, Codex, OpenCode, Pi, and any future agent. Normalized output, portable threads, zero code to add a backend.</p>
 
@@ -220,6 +224,14 @@ oa --json "explain this codebase"</code></pre>
   color: var(--vp-c-text-3);
   font-size: 0.875rem;
   font-weight: 500;
+}
+
+.version-tag {
+  font-family: var(--vp-font-family-mono);
+  font-size: 0.6875rem;
+  color: var(--vp-c-text-3);
+  letter-spacing: 0.05em;
+  margin-left: auto;
 }
 
 .subtitle {
