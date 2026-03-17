@@ -2,6 +2,18 @@
 
 All notable changes to oneagent are documented here.
 
+## [0.10.5] - 2026-03-17
+
+### Added
+
+- `paths` config field — additional directories to search when a backend CLI isn't in `$PATH`. Supports `~` expansion. Embedded defaults ship with known install locations for each backend.
+- Troubleshooting doc with PATH and config-based fixes for missing backends.
+- Improved error message when a backend CLI is not found, with a link to the troubleshooting guide.
+
+### Changed
+
+- `oa list` output cleaned up: no redundant program name or format column, only shows model when explicitly set, marks unavailable backends with `(not installed)`.
+
 ## [0.10.4] - 2026-03-17
 
 ### Changed
