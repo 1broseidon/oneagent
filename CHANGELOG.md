@@ -2,6 +2,14 @@
 
 All notable changes to oneagent are documented here.
 
+## [0.10.4] - 2026-03-17
+
+### Changed
+
+- `oa list` now shows `(not installed)` for backends whose CLI is not found in PATH.
+- Switched Homebrew distribution from cask to formula — no more Gatekeeper issues on macOS.
+- Install with `brew install 1broseidon/tap/oa`.
+
 ## [0.10.3] - 2026-03-17
 
 ### Fixed
