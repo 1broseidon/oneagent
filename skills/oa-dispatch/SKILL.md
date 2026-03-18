@@ -129,6 +129,22 @@ Always verify dispatched work before proceeding:
 
 If the result is wrong, either fix it yourself or dispatch a follow-up with more specific instructions.
 
+## Multi-agent scripts
+
+For complex dispatch patterns, use the bundled scripts:
+
+- **`scripts/converse.sh`** — Two agents discuss a problem on a shared thread, alternating turns, then synthesize findings into an action plan.
+  ```bash
+  bash scripts/converse.sh -a claude -b codex -t 3 "the service crashes after 5 minutes under load"
+  ```
+
+- **`scripts/multi-review.sh`** — Dispatch parallel code reviews to different agents (security + performance), then merge into one summary.
+  ```bash
+  bash scripts/multi-review.sh
+  ```
+
+Both scripts use threads, pipes, and hooks — the same primitives available for any custom workflow.
+
 ## Gotchas
 
 - The dispatched agent runs in your working directory but has no access to your conversation history. Every prompt must be self-contained.
