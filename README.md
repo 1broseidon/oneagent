@@ -1,6 +1,8 @@
 # oneagent
 
 [![GitHub Stars](https://img.shields.io/github/stars/1broseidon/oneagent?style=social)](https://github.com/1broseidon/oneagent/stargazers)
+[![Go Reference](https://pkg.go.dev/badge/github.com/1broseidon/oneagent.svg)](https://pkg.go.dev/github.com/1broseidon/oneagent)
+[![Go Report Card](https://goreportcard.com/badge/github.com/1broseidon/oneagent)](https://goreportcard.com/report/github.com/1broseidon/oneagent)
 
 Config-driven multi-agent CLI.
 
