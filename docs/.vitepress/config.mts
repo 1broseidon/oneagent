@@ -42,6 +42,7 @@ export default (async () => {
             { text: 'Portable Threads', link: '/guide/threads' },
             { text: 'Agent-as-Tool', link: '/guide/agent-as-tool' },
             { text: 'Pipes & Pipelines', link: '/guide/pipelines' },
+            { text: 'Hooks', link: '/guide/hooks' },
           ],
         },
         {

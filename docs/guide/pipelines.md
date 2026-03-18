@@ -41,24 +41,70 @@ This works because:
 - The thread carries context even when switching backends
 - `git diff` pipes the actual file changes into the final step
 
-## Mixing pipes and threads
+## Self-healing loop
 
-Combine piped context with threads for powerful workflows:
+Run tests, pipe failures to an agent, repeat until green:
 
 ```sh
-# Feed test failures into a fix-iterate loop
-go test ./... 2>&1 | oa -b claude -t fix "diagnose and fix these failures" && \
-oa -b codex -t fix "run the tests again and verify the fix"
+for i in 1 2 3; do
+  go test ./... 2>&1 && break
+  go test ./... 2>&1 | oa -b codex -t fix "fix these test failures, attempt $i of 3"
+done
 ```
 
-## When to use pipes vs threads
+## Multi-agent review
+
+Different agents with different perspectives, results merged:
+
+```sh
+git diff main | oa -b claude "security review" > /tmp/security.md && \
+git diff main | oa -b codex "performance review" > /tmp/perf.md && \
+cat /tmp/security.md /tmp/perf.md | oa -b claude "synthesize into one summary with action items"
+```
+
+## Daily digest with pipes + hooks + threads
+
+Gather context from multiple sources, synthesize, notify:
+
+```sh
+(
+  echo "=== Git activity ==="
+  git log --oneline --since="yesterday"
+  echo "=== Open PRs ==="
+  gh pr list --state open
+  echo "=== Failing checks ==="
+  gh run list --status failure --limit 5
+) | oa -b claude -t "daily-$(date +%Y%m%d)" \
+  --post-run 'curl -s -X POST "$SLACK_WEBHOOK" -H "Content-Type: application/json" -d "{\"text\": \"$(head -c 3000)\"}"' \
+  "daily standup summary: what happened yesterday, what needs attention today"
+```
+
+Pipe gathers context. Agent synthesizes. Post-run hook pushes to Slack. Thread preserves history so tomorrow's run has context from today.
+
+## The four primitives
+
+`oa` has four composable primitives. Each is useful on its own; together they're an agent orchestration layer in plain shell.
+
+| Primitive | What it does | Example |
+|-----------|-------------|---------|
+| **Pipes** | Feed content into an agent as context | `git diff \| oa "review"` |
+| **Chains** | Sequential multi-agent workflows | `oa "build" && oa "test"` |
+| **Hooks** | Lifecycle automation around each call | `--post-run 'notify-send ...'` |
+| **Threads** | Conversation memory across steps | `-t feat` shared across agents |
+
+No SDK, no framework, no orchestration server. Standard shell.
+
+## When to use what
 
 | Pattern | Use when |
 |---------|----------|
-| `cat file \| oa "instruction"` | You want to pass specific content as context for a one-shot task |
-| `oa -t id "instruction"` | You want conversation continuity across multiple steps |
-| `cmd \| oa -t id "instruction"` | Both — pass content and maintain conversation history |
-| `oa -t id "step 1" && oa -t id "step 2"` | Sequential multi-agent workflow with shared context |
+| `cat file \| oa "instruction"` | Pass specific content as context |
+| `oa -t id "step 1" && oa -t id "step 2"` | Sequential workflow with shared memory |
+| `--pre-run` / `--post-run` | Setup, teardown, notifications, logging |
+| `-t id` | Conversation continuity across steps or sessions |
+| All four combined | Complex workflows: isolated worktree, multi-agent pipeline, notify on completion |
+
+See [Hooks](/guide/hooks) for the full hook reference and more recipes.
 
 ## Why not Unix pipes between agents?
 
