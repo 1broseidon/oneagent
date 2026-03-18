@@ -395,16 +395,9 @@ func hookEnvPost(opts RunOpts, model string, resp Response) []string {
 	return env
 }
 
-// runPreHook executes a pre-run shell command. Non-zero exit aborts the run.
+// runPreHook executes a pre-run shell command via sh -c. Non-zero exit aborts the run.
 func runPreHook(cmdStr string, env []string) error {
-	args, err := tokenize(cmdStr)
-	if err != nil {
-		return fmt.Errorf("tokenize: %w", err)
-	}
-	if len(args) == 0 {
-		return fmt.Errorf("empty command")
-	}
-	cmd := exec.Command(args[0], args[1:]...)
+	cmd := exec.Command("sh", "-c", cmdStr)
 	cmd.Env = env
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
@@ -417,19 +410,10 @@ func runPreHook(cmdStr string, env []string) error {
 	return nil
 }
 
-// runPostHook executes a post-run shell command. Errors are logged but do not
+// runPostHook executes a post-run shell command via sh -c. Errors are logged but do not
 // affect the response (best-effort).
 func runPostHook(cmdStr string, env []string, result string) {
-	args, err := tokenize(cmdStr)
-	if err != nil {
-		log.Printf("post-run hook tokenize failed: %v", err)
-		return
-	}
-	if len(args) == 0 {
-		log.Printf("post-run hook command is empty")
-		return
-	}
-	cmd := exec.Command(args[0], args[1:]...)
+	cmd := exec.Command("sh", "-c", cmdStr)
 	cmd.Stdin = strings.NewReader(result)
 	cmd.Env = env
 	var stderr strings.Builder
