@@ -189,7 +189,7 @@ func buildCmd(b Backend, opts RunOpts) (*exec.Cmd, error) {
 
 	prog := resolveProgram(args[0], b.Paths)
 	cmd := exec.Command(prog, args[1:]...)
-	if opts.CWD != "" && !containsVar(b.Cmd, "{cwd}") {
+	if opts.CWD != "" && !containsVar(tmpl, "{cwd}") {
 		cmd.Dir = opts.CWD
 	}
 	cmd.Env = os.Environ()
@@ -265,7 +265,7 @@ func (c Client) invoke(opts RunOpts, emit func(StreamEvent)) Response {
 	emitFinal(emit, finalEvent(resp))
 
 	// 8-10. Post-run hooks and callback
-	c.invokePostPhase(opts, b, model, resp)
+	c.invokePostPhase(opts, b, model, original, resp)
 
 	return resp
 }
@@ -282,14 +282,14 @@ func (c Client) invokePrePhase(opts *RunOpts, b Backend) (*Thread, string, strin
 
 	// 2. Thread preparation
 	var thread *Thread
-	var original string
+	original := opts.Prompt
 	if opts.ThreadID != "" {
 		var err error
 		thread, err = c.threadStore().LoadThread(opts.ThreadID)
 		if err != nil {
 			return nil, "", "", err
 		}
-		original = prepareThreadPrompt(thread, opts)
+		prepareThreadPrompt(thread, opts)
 	}
 
 	model := opts.Model
@@ -315,7 +315,7 @@ func (c Client) invokePrePhase(opts *RunOpts, b Backend) (*Thread, string, strin
 }
 
 // invokePostPhase runs lifecycle steps 8-10: config post-hook, CLI post-hook, library callback.
-func (c Client) invokePostPhase(opts RunOpts, b Backend, model string, resp Response) {
+func (c Client) invokePostPhase(opts RunOpts, b Backend, model, originalPrompt string, resp Response) {
 	// 8. Config post_run shell command
 	if b.PostRunCmd != "" {
 		runPostHook(b.PostRunCmd, hookEnvPost(opts, model, resp), resp.Result)
@@ -328,7 +328,9 @@ func (c Client) invokePostPhase(opts RunOpts, b Backend, model string, resp Resp
 
 	// 10. Library PostRun callback
 	if opts.PostRun != nil {
-		opts.PostRun(&HookContext{Opts: opts, Response: resp})
+		hookOpts := opts
+		hookOpts.Prompt = originalPrompt
+		opts.PostRun(&HookContext{Opts: hookOpts, Response: resp})
 	}
 }
 
@@ -580,8 +582,13 @@ func runJSONL(cmd *exec.Cmd, b Backend, backend string, emit func(StreamEvent)) 
 			result = lastErr
 		}
 	}
-	if err == nil && scanErr != nil {
-		err = scanErr
+	if scanErr != nil {
+		log.Printf("scanner error: %v", scanErr)
+		if err != nil {
+			err = errors.Join(err, scanErr)
+		} else {
+			err = scanErr
+		}
 	}
 	return result, session, err
 }

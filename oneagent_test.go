@@ -1,6 +1,9 @@
 package oneagent
 
 import (
+	"bytes"
+	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -365,6 +368,36 @@ func TestResumeCmdSelectedWithSession(t *testing.T) {
 	}
 }
 
+func TestCWDOnResume(t *testing.T) {
+	t.Run("resume without cwd template sets cmd dir", func(t *testing.T) {
+		b := Backend{
+			Cmd:       []string{"agent", "-C", "{cwd}", "--prompt", "{prompt}"},
+			ResumeCmd: []string{"agent", "--resume", "{session}", "--prompt", "{prompt}"},
+		}
+		cmd, err := buildCmd(b, RunOpts{Backend: "r", Prompt: "hi", SessionID: "s99", CWD: "/tmp/test"})
+		if err != nil {
+			t.Fatalf("buildCmd returned error: %v", err)
+		}
+		if cmd.Dir != "/tmp/test" {
+			t.Fatalf("cmd.Dir = %q, want /tmp/test", cmd.Dir)
+		}
+	})
+
+	t.Run("resume with cwd template leaves cmd dir empty", func(t *testing.T) {
+		b := Backend{
+			Cmd:       []string{"agent", "--prompt", "{prompt}"},
+			ResumeCmd: []string{"agent", "--resume", "{session}", "-C", "{cwd}", "--prompt", "{prompt}"},
+		}
+		cmd, err := buildCmd(b, RunOpts{Backend: "r", Prompt: "hi", SessionID: "s99", CWD: "/tmp/test"})
+		if err != nil {
+			t.Fatalf("buildCmd returned error: %v", err)
+		}
+		if cmd.Dir != "" {
+			t.Fatalf("cmd.Dir = %q, want empty", cmd.Dir)
+		}
+	})
+}
+
 func TestCwdSetWhenNotInTemplate(t *testing.T) {
 	b := Backend{Cmd: []string{"sh", "-c", "echo ok"}}
 	cmd, err := buildCmd(b, RunOpts{Backend: "c", Prompt: "hi", CWD: "/tmp/test"})
@@ -402,6 +435,45 @@ func TestMatchWhenHandlesBooleanValues(t *testing.T) {
 	line := map[string]any{"type": "result", "is_error": true}
 	if !matchWhen(line, "type=result&is_error=true") {
 		t.Fatal("matchWhen should match boolean values")
+	}
+}
+
+func TestScannerOverflowLogged(t *testing.T) {
+	dir := t.TempDir()
+	eventsPath := filepath.Join(dir, "events.jsonl")
+	events := `{"type":"delta","data":{"text":"` + strings.Repeat("a", 1024*1024+1) + `"}}` + "\n"
+	if err := os.WriteFile(eventsPath, []byte(events), 0o644); err != nil {
+		t.Fatalf("write events: %v", err)
+	}
+
+	var logs bytes.Buffer
+	oldWriter := log.Writer()
+	oldFlags := log.Flags()
+	oldPrefix := log.Prefix()
+	log.SetOutput(&logs)
+	log.SetFlags(0)
+	log.SetPrefix("")
+	defer func() {
+		log.SetOutput(oldWriter)
+		log.SetFlags(oldFlags)
+		log.SetPrefix(oldPrefix)
+	}()
+
+	backends := map[string]Backend{
+		"jl": {
+			Cmd:        []string{"sh", "-c", fmt.Sprintf("cat %q; exit 1", eventsPath)},
+			Format:     "jsonl",
+			Result:     "data.text",
+			ResultWhen: "type=delta",
+		},
+	}
+	resp := Run(backends, RunOpts{Backend: "jl", Prompt: "hi"})
+
+	if resp.Error == "" {
+		t.Fatal("expected scanner overflow to surface as an error")
+	}
+	if !strings.Contains(logs.String(), "scanner error:") || !strings.Contains(logs.String(), "token too long") {
+		t.Fatalf("expected scanner overflow to be logged, got %q", logs.String())
 	}
 }
 

@@ -144,21 +144,43 @@ type Store interface {
 }
 ```
 
-## Post-Run Hooks
+## Hooks
 
-Use `OnComplete` to run a command after a thread turn completes. The result is piped to stdin:
+Use `PreRun` and `PostRun` callbacks to run logic before and after agent execution:
 
 ```go
-resp := client.RunWithThread(oneagent.RunOpts{
-	Backend:    "claude",
-	ThreadID:   "daily-review",
-	Prompt:     "summarize today",
-	Source:     "cron-nightly",
-	OnComplete: "curl -s -X POST https://hooks.example.com/notify -d @-",
+resp := client.Run(oneagent.RunOpts{
+	Backend:  "claude",
+	ThreadID: "daily-review",
+	Prompt:   "summarize today",
+	Source:   "cron-nightly",
+	PreRun: func(opts *oneagent.RunOpts) error {
+		// modify opts, set up worktree, validate environment
+		opts.CWD = "/tmp/workspace"
+		return nil // return error to abort
+	},
+	PostRun: func(ctx *oneagent.HookContext) {
+		// notify, clean up, log — receives the original prompt, not replay-expanded
+		fmt.Println("Done:", ctx.Response.Result)
+	},
 })
 ```
 
-The hook receives environment variables `OA_THREAD_ID`, `OA_BACKEND`, `OA_SESSION`, and `OA_SOURCE`. Hooks are best-effort — failures are logged but don't affect the response.
+For shell-based hooks (useful from the CLI or config), use `PreRunCmd` and `PostRunCmd`:
+
+```go
+resp := client.Run(oneagent.RunOpts{
+	Backend:    "claude",
+	Prompt:     "summarize today",
+	PostRunCmd: "curl -s -X POST https://hooks.example.com/notify -d @-",
+})
+```
+
+Post-run shell hooks receive the result on stdin and environment variables: `OA_BACKEND`, `OA_THREAD_ID`, `OA_SOURCE`, `OA_MODEL`, `OA_CWD`, `OA_SESSION`, `OA_ERROR`, `OA_EXIT`. Pre-run hooks receive the same minus session/error/exit.
+
+Hooks from the backend config (`pre_run`/`post_run` fields) and hooks from `RunOpts` both execute — config first, then per-invocation. Pre-run hooks abort the run on non-zero exit. Post-run hooks are best-effort.
+
+See the [Hooks guide](/guide/hooks) for the full reference.
 
 ## Typical Integration Pattern
 

@@ -133,6 +133,21 @@ func TestFilesystemStoreUsesCustomDir(t *testing.T) {
 	}
 }
 
+func TestThreadIDTraversal(t *testing.T) {
+	store := FilesystemStore{Dir: t.TempDir()}
+
+	for _, id := range []string{"../escape", "/abs", `a\b`, ".", ".."} {
+		t.Run(id, func(t *testing.T) {
+			if _, err := store.LoadThread(id); err == nil {
+				t.Fatalf("LoadThread(%q) should reject invalid thread IDs", id)
+			}
+			if err := store.SaveThread(&Thread{ID: id, NativeSessions: map[string]string{}}); err == nil {
+				t.Fatalf("SaveThread(%q) should reject invalid thread IDs", id)
+			}
+		})
+	}
+}
+
 func TestClientUsesCustomInMemoryStore(t *testing.T) {
 	store := newMemoryStore()
 	client := Client{
@@ -412,6 +427,39 @@ func TestPostRunCallbackReceivesContext(t *testing.T) {
 	}
 	if got.Opts.Backend != "a" {
 		t.Fatalf("PostRun backend = %q, want a", got.Opts.Backend)
+	}
+}
+
+func TestPostRunOriginalPrompt(t *testing.T) {
+	store := newMemoryStore()
+	store.threads["threaded"] = &Thread{
+		ID: "threaded",
+		Turns: []Turn{
+			{Role: "user", Content: "earlier", Backend: "b"},
+			{Role: "assistant", Content: "done", Backend: "b"},
+		},
+		NativeSessions: map[string]string{},
+	}
+	client := Client{
+		Backends: map[string]Backend{"a": staticBackend("ok", "sa")},
+		Store:    store,
+	}
+
+	var gotPrompt string
+	resp := client.RunWithThread(RunOpts{
+		Backend:  "a",
+		Prompt:   "current request",
+		ThreadID: "threaded",
+		PostRun: func(ctx *HookContext) {
+			gotPrompt = ctx.Opts.Prompt
+		},
+	})
+
+	if resp.Error != "" {
+		t.Fatalf("unexpected error: %s", resp.Error)
+	}
+	if gotPrompt != "current request" {
+		t.Fatalf("PostRun prompt = %q, want original prompt", gotPrompt)
 	}
 }
 
@@ -744,6 +792,54 @@ func TestLoadThreadCorruptFile(t *testing.T) {
 	_, err := LoadThread("bad")
 	if err == nil {
 		t.Fatal("expected error for corrupt thread file")
+	}
+}
+
+func TestAtomicSave(t *testing.T) {
+	store := FilesystemStore{Dir: t.TempDir()}
+	original := &Thread{
+		ID:             "atomic",
+		Summary:        "before",
+		Turns:          []Turn{{Role: "user", Content: "hello"}},
+		NativeSessions: map[string]string{"a": "s1"},
+	}
+	if err := store.SaveThread(original); err != nil {
+		t.Fatalf("initial save: %v", err)
+	}
+
+	path := filepath.Join(store.Dir, "atomic.json")
+	tmpPath := path + ".tmp"
+	if err := os.WriteFile(tmpPath, []byte(`{"id":"atomic","turns":[`), 0o644); err != nil {
+		t.Fatalf("write stale temp file: %v", err)
+	}
+
+	loaded, err := store.LoadThread("atomic")
+	if err != nil {
+		t.Fatalf("load with stale temp file: %v", err)
+	}
+	if loaded.Summary != "before" || loaded.NativeSessions["a"] != "s1" {
+		t.Fatalf("final thread changed unexpectedly: %+v", loaded)
+	}
+
+	updated := &Thread{
+		ID:             "atomic",
+		Summary:        "after",
+		Turns:          append(loaded.Turns, Turn{Role: "assistant", Content: "world"}),
+		NativeSessions: map[string]string{"a": "s2"},
+	}
+	if err := store.SaveThread(updated); err != nil {
+		t.Fatalf("save with stale temp file present: %v", err)
+	}
+
+	after, err := store.LoadThread("atomic")
+	if err != nil {
+		t.Fatalf("load after atomic save: %v", err)
+	}
+	if after.Summary != "after" || after.NativeSessions["a"] != "s2" || len(after.Turns) != 2 {
+		t.Fatalf("unexpected saved thread: %+v", after)
+	}
+	if _, err := os.Stat(tmpPath); !os.IsNotExist(err) {
+		t.Fatalf("temp file should be cleaned up, stat err = %v", err)
 	}
 }
 

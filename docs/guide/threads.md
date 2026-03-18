@@ -33,13 +33,15 @@ oa thread compact auth-fix
 
 Use `compact` to summarize older turns and keep long-running threads manageable.
 
-## Post-Run Hooks
+## Hooks
 
-Run a command after a thread turn completes with `--on-complete`. The result is piped to the command's stdin:
+Run commands before or after any thread turn with `--pre-run` and `--post-run`:
 
 ```sh
-oa -t daily -b claude --on-complete 'curl -s -X POST https://hooks.example.com/notify -d @-' \
+oa -t daily -b claude \
+  --pre-run 'echo "Starting $OA_BACKEND on thread $OA_THREAD_ID"' \
+  --post-run 'curl -s -X POST https://hooks.example.com/notify -d @-' \
   "summarize today's action items"
 ```
 
-Environment variables `OA_THREAD_ID`, `OA_BACKEND`, `OA_SESSION`, and `OA_SOURCE` are set for the hook. Hooks are best-effort — failures are logged but don't affect the response.
+See the [Hooks guide](/guide/hooks) for the full reference, environment variables, and recipes.

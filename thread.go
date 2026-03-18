@@ -52,6 +52,17 @@ func (s FilesystemStore) dir() string {
 	return ThreadDir()
 }
 
+func validateThreadID(id string) error {
+	switch {
+	case id == ".", id == "..":
+		return fmt.Errorf("invalid thread id %q", id)
+	case strings.ContainsAny(id, "/\\"):
+		return fmt.Errorf("invalid thread id %q", id)
+	default:
+		return nil
+	}
+}
+
 // LoadThread reads a thread from disk. A missing file returns an empty thread.
 func LoadThread(id string) (*Thread, error) {
 	return FilesystemStore{}.LoadThread(id)
@@ -64,6 +75,9 @@ func (c Client) LoadThread(id string) (*Thread, error) {
 
 // LoadThread reads a thread from the filesystem store. A missing file returns an empty thread.
 func (s FilesystemStore) LoadThread(id string) (*Thread, error) {
+	if err := validateThreadID(id); err != nil {
+		return nil, err
+	}
 	path := filepath.Join(s.dir(), id+".json")
 	f, err := os.Open(path)
 	if os.IsNotExist(err) {
@@ -105,6 +119,9 @@ func (c Client) SaveThread(t *Thread) error {
 
 // SaveThread writes the thread to disk, creating the directory if needed.
 func (s FilesystemStore) SaveThread(t *Thread) error {
+	if err := validateThreadID(t.ID); err != nil {
+		return err
+	}
 	dir := s.dir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -114,6 +131,7 @@ func (s FilesystemStore) SaveThread(t *Thread) error {
 		return err
 	}
 	path := filepath.Join(dir, t.ID+".json")
+	tmpPath := path + ".tmp"
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
 	if err != nil {
 		return err
@@ -125,16 +143,32 @@ func (s FilesystemStore) SaveThread(t *Thread) error {
 	defer func() {
 		_ = flockUnlock(f.Fd())
 	}()
-	if err := f.Truncate(0); err != nil {
+	tmp, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
 		return err
 	}
-	if _, err := f.Seek(0, 0); err != nil {
+	removeTmp := true
+	defer func() {
+		if removeTmp {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
 		return err
 	}
-	if _, err := f.Write(data); err != nil {
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
 		return err
 	}
-	return f.Sync()
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	removeTmp = false
+	return nil
 }
 
 // CompileContext builds a context string from the thread's history within a byte budget.
@@ -188,20 +222,17 @@ func (t *Thread) lastTurnBackend() string {
 }
 
 // prepareThreadPrompt injects thread context into opts if no native session exists.
-// Returns the original user prompt (without compiled context) for storage.
-func prepareThreadPrompt(thread *Thread, opts *RunOpts) string {
-	original := opts.Prompt
+func prepareThreadPrompt(thread *Thread, opts *RunOpts) {
 	// Only reuse a native session if this backend was the last to contribute.
 	// If another backend spoke since, replay canonical context instead.
 	if sid, ok := thread.NativeSessions[opts.Backend]; ok && opts.SessionID == "" && thread.lastTurnBackend() == opts.Backend {
 		opts.SessionID = sid
-		return original
+		return
 	}
 	if len(thread.Turns) > 0 && opts.SessionID == "" {
 		ctx, _ := thread.CompileContext(32768)
 		opts.Prompt = ctx + "\n\nNew request:\n" + opts.Prompt
 	}
-	return original
 }
 
 // recordTurns appends the user prompt and assistant response to the thread.
