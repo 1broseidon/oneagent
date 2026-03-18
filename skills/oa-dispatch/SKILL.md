@@ -21,14 +21,27 @@ Do not dispatch vague or open-ended tasks. The receiving agent has no access to 
 
 ## Basic command
 
+Always pipe the prompt into `oa` instead of passing it as an argument. This keeps prompt content out of process listings (`ps aux`):
+
 ```bash
-oa -b <backend> -m <model> "<prompt>"
+echo "<prompt>" | oa -b <backend> -m <model>
 ```
 
 For background execution with streaming visibility:
 
 ```bash
-oa -b claude "Edit path/to/file.go: <specific instructions>" --jsonl
+echo "Edit path/to/file.go: <specific instructions>" | oa -b claude --jsonl
+```
+
+For multi-line prompts, use a heredoc:
+
+```bash
+cat <<'EOF' | oa -b codex --jsonl
+Edit internal/auth/handler.go: add rate limiting to the Login function.
+Use x/time/rate with a limit of 5 requests per second per IP.
+Do not modify any other functions. Do not ask for confirmation, just make the edits.
+Run go test ./internal/auth/... when done.
+EOF
 ```
 
 ## Constructing effective prompts
@@ -68,9 +81,9 @@ Built-in backends:
 To use a specific model through a backend that supports model routing:
 
 ```bash
-oa -b pi -m openai-codex/gpt-5.4 "prompt"
-oa -b opencode -m ollama/llama3.1 "prompt"
-oa -b claude -m sonnet "prompt"
+echo "prompt" | oa -b pi -m openai-codex/gpt-5.4
+echo "prompt" | oa -b opencode -m ollama/llama3.1
+echo "prompt" | oa -b claude -m sonnet
 ```
 
 Run `oa list` to see all configured backends.
@@ -81,10 +94,10 @@ Run the dispatch as a background task so you can continue working:
 
 ```bash
 # Background with JSONL streaming (can inspect progress)
-oa -b codex "Edit file.go: add error handling to ProcessOrder" --jsonl &
+echo "Edit file.go: add error handling to ProcessOrder" | oa -b codex --jsonl &
 
 # Or with a specific model via Pi
-oa -b pi -m openai-codex/gpt-5.4 "Edit file.go: add error handling to ProcessOrder" --jsonl &
+echo "Edit file.go: add error handling to ProcessOrder" | oa -b pi -m openai-codex/gpt-5.4 --jsonl &
 ```
 
 After the task completes, verify the changes:
@@ -103,10 +116,10 @@ When a task needs follow-up work, use threads to carry context:
 
 ```bash
 # First pass with Claude
-oa -b claude -t refactor-auth "Refactor internal/auth/handler.go to extract middleware"
+echo "Refactor internal/auth/handler.go to extract middleware" | oa -b claude -t refactor-auth
 
 # Follow-up on the same thread, different backend
-oa -b codex -t refactor-auth "Now add tests for the extracted middleware"
+echo "Now add tests for the extracted middleware" | oa -b codex -t refactor-auth
 ```
 
 Threads are portable — switch backends mid-thread and context carries over automatically.
