@@ -14,8 +14,7 @@ go install github.com/1broseidon/oneagent/cmd/oa@latest
 Or via Homebrew:
 
 ```sh
-brew tap 1broseidon/tap
-brew install --cask 1broseidon/tap/oa
+brew install 1broseidon/tap/oa
 ```
 
 ## Quick Start
@@ -35,6 +34,10 @@ oa --stream "review the repo"
 
 # Specify model and working directory
 oa -b pi -m "google/gemini-2.5-pro" -C ~/project "add tests"
+
+# Pipe content as context
+git diff | oa -b claude "review these changes"
+cat handler.go | oa -b codex "find bugs in this file"
 ```
 
 Works out of the box if `claude`, `codex`, `opencode`, or `pi` is installed and signed in.

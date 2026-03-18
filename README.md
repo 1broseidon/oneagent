@@ -22,15 +22,6 @@ Or with Go:
 go install github.com/1broseidon/oneagent/cmd/oa@latest
 ```
 
-This is currently the recommended path on macOS. The Homebrew tap uses a cask that installs a downloaded binary, so macOS Gatekeeper may block it until the project ships a signed and notarized macOS distribution or moves to a formula-based install.
-
-Homebrew:
-
-```sh
-brew tap 1broseidon/tap
-brew install --cask 1broseidon/tap/oa
-```
-
 ## Quick start
 
 ```sh
@@ -60,6 +51,11 @@ oa -b pi -m "google/gemini-2.5-pro" -C ~/project "add tests"
 # Resume a native session
 oa -b claude -s abc123 "now refactor it"
 
+# Pipe content as context
+git diff | oa -b claude "review these changes"
+cat internal/auth/handler.go | oa -b codex "find bugs in this file"
+go test ./... 2>&1 | oa -b claude "fix these test failures"
+
 # Thread management
 oa thread list
 oa thread show auth-fix
@@ -87,6 +83,32 @@ An [agent skill](./skills/oa-dispatch/) is included for agents that support the 
 ```sh
 npx skills add 1broseidon/oneagent --skill oa-dispatch
 ```
+
+## Pipelines
+
+Chain agents sequentially with `&&` and shared threads. Each step sees the file changes and conversation context from previous steps:
+
+```sh
+# Build → review → document, different agents, one thread
+oa -b codex -t feat "add input validation to the signup handler" && \
+oa -b codex -t feat "review the changes, run tests, report any issues" && \
+git diff | oa -b claude "write a changelog entry for this change"
+```
+
+Pipe content into any step as context:
+
+```sh
+# Feed test output to an agent for diagnosis
+go test ./... 2>&1 | oa -b claude -t fix "diagnose these failures and fix them"
+
+# Code review a specific diff
+git diff main..HEAD | oa -b codex "review this PR for security issues"
+
+# Summarize a log file
+cat /var/log/app/errors.log | oa -b claude "summarize the error patterns"
+```
+
+Piped content becomes context. Positional args become instructions. If both are provided, they're combined.
 
 ## Output
 

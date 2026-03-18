@@ -41,6 +41,7 @@ export default (async () => {
             { text: 'Output Formats', link: '/guide/output' },
             { text: 'Portable Threads', link: '/guide/threads' },
             { text: 'Agent-as-Tool', link: '/guide/agent-as-tool' },
+            { text: 'Pipes & Pipelines', link: '/guide/pipelines' },
           ],
         },
         {
