@@ -4,9 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -233,85 +231,15 @@ func RunWithThreadStream(backends map[string]Backend, opts RunOpts, emit func(St
 }
 
 // RunWithThread wraps Run with thread load/save and context injection.
+// Threading is handled by invoke() when ThreadID is set.
 func (c Client) RunWithThread(opts RunOpts) Response {
-	return c.runWithThread(opts, nil)
+	return c.invoke(opts, nil)
 }
 
 // RunWithThreadStream wraps RunStream with thread load/save and context injection.
+// Threading is handled by invoke() when ThreadID is set.
 func (c Client) RunWithThreadStream(opts RunOpts, emit func(StreamEvent)) Response {
-	resp := c.runWithThread(opts, emit)
-	emitFinal(emit, finalEvent(resp))
-	return resp
-}
-
-func (c Client) runWithThread(opts RunOpts, emit func(StreamEvent)) Response {
-	if opts.ThreadID == "" {
-		return c.run(opts, emit)
-	}
-
-	thread, err := c.threadStore().LoadThread(opts.ThreadID)
-	if err != nil {
-		return Response{Error: err.Error(), Backend: opts.Backend, ThreadID: opts.ThreadID}
-	}
-
-	original := prepareThreadPrompt(thread, &opts)
-	var streamSaveErr error
-	resp := c.run(opts, func(event StreamEvent) {
-		event.ThreadID = opts.ThreadID
-		if event.Type == "session" && event.Session != "" {
-			thread.NativeSessions[opts.Backend] = event.Session
-			if err := c.threadStore().SaveThread(thread); err != nil && streamSaveErr == nil {
-				streamSaveErr = err
-			}
-		}
-		emitEvent(emit, event)
-	})
-	if streamSaveErr != nil {
-		resp.Error = "thread save failed: " + streamSaveErr.Error()
-	}
-
-	thread.recordTurns(original, resp, opts.Source)
-	if err := c.threadStore().SaveThread(thread); err != nil {
-		resp.Error = "thread save failed: " + err.Error()
-	}
-	resp.ThreadID = opts.ThreadID
-	runOnCompleteHook(opts, resp)
-	return resp
-}
-
-func runOnCompleteHook(opts RunOpts, resp Response) {
-	if opts.OnComplete == "" || resp.Error != "" {
-		return
-	}
-
-	args, err := tokenize(opts.OnComplete)
-	if err != nil {
-		log.Printf("on-complete hook tokenize failed: %v", err)
-		return
-	}
-	if len(args) == 0 {
-		log.Printf("on-complete hook command is empty")
-		return
-	}
-
-	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Stdin = strings.NewReader(resp.Result)
-	cmd.Env = append(os.Environ(),
-		"OA_THREAD_ID="+opts.ThreadID,
-		"OA_BACKEND="+resp.Backend,
-		"OA_SESSION="+resp.Session,
-		"OA_SOURCE="+opts.Source,
-	)
-
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if s := strings.TrimSpace(stderr.String()); s != "" {
-			log.Printf("on-complete hook failed: %v: %s", err, s)
-			return
-		}
-		log.Printf("on-complete hook failed: %v", err)
-	}
+	return c.invoke(opts, emit)
 }
 
 // CompactThread summarizes old turns using a backend, keeping the last keepTurns.
@@ -343,7 +271,7 @@ func (c Client) CompactThread(threadID, backend string) error {
 	text := strings.Join(lines, "\n")
 
 	prompt := "Summarize this conversation concisely, preserving key decisions and context:\n\n" + text
-	resp := c.Run(RunOpts{Backend: backend, Prompt: prompt})
+	resp := c.runDirect(RunOpts{Backend: backend, Prompt: prompt})
 	if resp.Error != "" {
 		return fmt.Errorf("compaction failed: %s", resp.Error)
 	}

@@ -2,6 +2,19 @@
 
 All notable changes to oneagent are documented here.
 
+## [0.11.0] - 2026-03-18
+
+### Added
+
+- Pre/post hook system — run commands or Go callbacks before and after agent execution. Config-level hooks fire on every backend invocation, CLI hooks (`--pre-run`/`--post-run`) are per-invocation. Both layers stack.
+- Library-level hook callbacks: `PreRun func(*RunOpts) error` can modify options or abort, `PostRun func(*HookContext)` for side effects.
+- `HookContext` type exposing both `RunOpts` and `Response` to post-run callbacks.
+- Internal calls (e.g., `CompactThread`) bypass hooks via `runDirect()`.
+
+### Removed
+
+- `OnComplete` field and `--on-complete` CLI flag — replaced by the general `PostRunCmd`/`--post-run` hook.
+
 ## [0.10.7] - 2026-03-18
 
 ### Added

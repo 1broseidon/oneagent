@@ -163,17 +163,24 @@ Threads let `oa` own the conversation history instead of relying on a single bac
 
 Use `oa thread compact <id>` to summarize older turns and keep long-running threads manageable.
 
-### Post-run hooks
+### Hooks
 
-Run a command after a thread turn completes with `--on-complete`. The result is piped to the command's stdin:
+Run commands before or after agent execution with `--pre-run` and `--post-run`:
 
 ```sh
-# Notify a webhook after every turn
-oa -t daily -b claude --on-complete 'curl -s -X POST https://hooks.example.com/notify -d @-' \
-  "summarize today's action items"
+# Set up a worktree before running, notify after
+oa -b codex -t feat \
+  --pre-run 'git worktree add -b oa-$OA_THREAD_ID ../oa-$OA_THREAD_ID HEAD' \
+  --post-run 'curl -s -X POST https://hooks.example.com/notify -d @-' \
+  "add input validation"
+
+# Post-run hook receives the result on stdin
+oa -b claude --post-run 'cat > /tmp/last-result.txt' "explain this codebase"
 ```
 
-Environment variables `OA_THREAD_ID`, `OA_BACKEND`, `OA_SESSION`, and `OA_SOURCE` are set for the hook. Hooks are best-effort — failures are logged but don't affect the response.
+Pre-run hooks abort the run on non-zero exit. Post-run hooks are best-effort. Both receive env vars: `OA_BACKEND`, `OA_THREAD_ID`, `OA_SOURCE`, `OA_MODEL`, `OA_CWD`. Post-run adds `OA_SESSION`, `OA_ERROR`, `OA_EXIT`.
+
+Hooks can also be set per-backend in config (run on every invocation) and as Go callbacks in the library. See [docs/library.md](./docs/library.md) and [docs/config.md](./docs/config.md).
 
 ## Configuration
 

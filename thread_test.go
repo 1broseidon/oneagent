@@ -232,7 +232,7 @@ func TestRunWithThreadStreamEmitsThreadEventsAndPersistsSession(t *testing.T) {
 	}
 }
 
-func TestRunWithThreadRunsOnCompleteHook(t *testing.T) {
+func TestPostRunHookReceivesResultAndEnv(t *testing.T) {
 	setupThreadHome(t)
 
 	home := os.Getenv("HOME")
@@ -241,7 +241,8 @@ func TestRunWithThreadRunsOnCompleteHook(t *testing.T) {
 	scriptPath := filepath.Join(home, "hook.sh")
 	script := "#!/bin/sh\n" +
 		"cat > \"$1\"\n" +
-		"printf 'OA_THREAD_ID=%s\nOA_BACKEND=%s\nOA_SESSION=%s\nOA_SOURCE=%s\n' \"$OA_THREAD_ID\" \"$OA_BACKEND\" \"$OA_SESSION\" \"$OA_SOURCE\" > \"$2\"\n"
+		"printf 'OA_THREAD_ID=%s\nOA_BACKEND=%s\nOA_SESSION=%s\nOA_SOURCE=%s\nOA_EXIT=%s\nOA_ERROR=%s\n' " +
+		"\"$OA_THREAD_ID\" \"$OA_BACKEND\" \"$OA_SESSION\" \"$OA_SOURCE\" \"$OA_EXIT\" \"$OA_ERROR\" > \"$2\"\n"
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write hook script: %v", err)
 	}
@@ -252,7 +253,7 @@ func TestRunWithThreadRunsOnCompleteHook(t *testing.T) {
 		Prompt:     "first",
 		ThreadID:   "t-hook",
 		Source:     "telegram",
-		OnComplete: fmt.Sprintf("%s '%s' '%s'", scriptPath, resultPath, envPath),
+		PostRunCmd: fmt.Sprintf("%s '%s' '%s'", scriptPath, resultPath, envPath),
 	})
 
 	if resp.Error != "" {
@@ -277,6 +278,7 @@ func TestRunWithThreadRunsOnCompleteHook(t *testing.T) {
 		"OA_BACKEND=a",
 		"OA_SESSION=sa",
 		"OA_SOURCE=telegram",
+		"OA_EXIT=0",
 	} {
 		if !strings.Contains(gotEnv, want) {
 			t.Fatalf("hook env missing %q:\n%s", want, gotEnv)
@@ -284,7 +286,7 @@ func TestRunWithThreadRunsOnCompleteHook(t *testing.T) {
 	}
 }
 
-func TestRunWithThreadOnCompleteHookIsBestEffort(t *testing.T) {
+func TestPostRunHookIsBestEffort(t *testing.T) {
 	setupThreadHome(t)
 
 	var logs bytes.Buffer
@@ -305,18 +307,18 @@ func TestRunWithThreadOnCompleteHookIsBestEffort(t *testing.T) {
 		Backend:    "a",
 		Prompt:     "first",
 		ThreadID:   "t-hook-fail",
-		OnComplete: "sh -c 'echo hook failed >&2; exit 17'",
+		PostRunCmd: "sh -c 'echo hook failed >&2; exit 17'",
 	})
 
 	if resp.Error != "" {
 		t.Fatalf("unexpected error: %s", resp.Error)
 	}
-	if !strings.Contains(logs.String(), "on-complete hook failed") {
+	if !strings.Contains(logs.String(), "post-run hook failed") {
 		t.Fatalf("expected hook failure to be logged, got %q", logs.String())
 	}
 }
 
-func TestRunWithThreadSkipsOnCompleteHookOnRunError(t *testing.T) {
+func TestPreRunHookAborts(t *testing.T) {
 	setupThreadHome(t)
 
 	home := os.Getenv("HOME")
@@ -327,25 +329,164 @@ func TestRunWithThreadSkipsOnCompleteHookOnRunError(t *testing.T) {
 		t.Fatalf("write marker script: %v", err)
 	}
 
-	backends := map[string]Backend{
-		"bad": {
-			Cmd:    []string{"sh", "-c", "exit 1"},
-			Format: "json",
-			Result: "result",
-		},
-	}
-	resp := RunWithThread(backends, RunOpts{
-		Backend:    "bad",
-		Prompt:     "boom",
-		ThreadID:   "t-hook-skip",
-		OnComplete: fmt.Sprintf("%s '%s'", scriptPath, markerPath),
+	backends := map[string]Backend{"a": staticBackend("ok", "sa")}
+	resp := Run(backends, RunOpts{
+		Backend:    "a",
+		Prompt:     "hi",
+		PreRunCmd:  "sh -c 'exit 1'",
+		PostRunCmd: fmt.Sprintf("%s '%s'", scriptPath, markerPath),
 	})
 
 	if resp.Error == "" {
-		t.Fatal("expected run error")
+		t.Fatal("expected pre-run abort error")
 	}
+	if !strings.Contains(resp.Error, "cli pre_run hook") {
+		t.Fatalf("error should mention cli pre_run hook, got %q", resp.Error)
+	}
+	// Post-run hook should NOT have run because pre-run aborted
 	if _, err := os.Stat(markerPath); !os.IsNotExist(err) {
-		t.Fatalf("hook should not have run, stat err = %v", err)
+		t.Fatalf("post-run hook should not have run after pre-run abort, stat err = %v", err)
+	}
+}
+
+func TestPreRunCallbackCanModifyOpts(t *testing.T) {
+	backends := map[string]Backend{"a": staticBackend("ok", "sa")}
+
+	var captured string
+	resp := Run(backends, RunOpts{
+		Backend: "a",
+		Prompt:  "original",
+		PreRun: func(opts *RunOpts) error {
+			captured = opts.Prompt
+			return nil
+		},
+	})
+
+	if resp.Error != "" {
+		t.Fatalf("unexpected error: %s", resp.Error)
+	}
+	if captured != "original" {
+		t.Fatalf("PreRun callback did not receive opts, got prompt=%q", captured)
+	}
+}
+
+func TestPreRunCallbackAborts(t *testing.T) {
+	backends := map[string]Backend{"a": staticBackend("ok", "sa")}
+
+	resp := Run(backends, RunOpts{
+		Backend: "a",
+		Prompt:  "hi",
+		PreRun: func(opts *RunOpts) error {
+			return fmt.Errorf("denied")
+		},
+	})
+
+	if resp.Error == "" {
+		t.Fatal("expected pre-run callback abort")
+	}
+	if !strings.Contains(resp.Error, "denied") {
+		t.Fatalf("error should contain denial reason, got %q", resp.Error)
+	}
+}
+
+func TestPostRunCallbackReceivesContext(t *testing.T) {
+	backends := map[string]Backend{"a": staticBackend("ok", "sa")}
+
+	var got *HookContext
+	resp := Run(backends, RunOpts{
+		Backend: "a",
+		Prompt:  "hi",
+		PostRun: func(ctx *HookContext) {
+			got = ctx
+		},
+	})
+
+	if resp.Error != "" {
+		t.Fatalf("unexpected error: %s", resp.Error)
+	}
+	if got == nil {
+		t.Fatal("PostRun callback not called")
+	}
+	if got.Response.Result != "ok" {
+		t.Fatalf("PostRun result = %q, want ok", got.Response.Result)
+	}
+	if got.Opts.Backend != "a" {
+		t.Fatalf("PostRun backend = %q, want a", got.Opts.Backend)
+	}
+}
+
+func TestConfigAndCLIHooksStack(t *testing.T) {
+	setupThreadHome(t)
+
+	home := os.Getenv("HOME")
+	configMarker := filepath.Join(home, "config_hook.txt")
+	cliMarker := filepath.Join(home, "cli_hook.txt")
+
+	configScript := filepath.Join(home, "config_hook.sh")
+	if err := os.WriteFile(configScript, []byte("#!/bin/sh\necho config > \"$1\"\n"), 0o755); err != nil {
+		t.Fatalf("write config hook: %v", err)
+	}
+	cliScript := filepath.Join(home, "cli_hook.sh")
+	if err := os.WriteFile(cliScript, []byte("#!/bin/sh\necho cli > \"$1\"\n"), 0o755); err != nil {
+		t.Fatalf("write cli hook: %v", err)
+	}
+
+	b := staticBackend("ok", "sa")
+	b.PostRunCmd = fmt.Sprintf("%s '%s'", configScript, configMarker)
+	backends := map[string]Backend{"a": b}
+
+	resp := Run(backends, RunOpts{
+		Backend:    "a",
+		Prompt:     "hi",
+		PostRunCmd: fmt.Sprintf("%s '%s'", cliScript, cliMarker),
+	})
+
+	if resp.Error != "" {
+		t.Fatalf("unexpected error: %s", resp.Error)
+	}
+
+	// Both hooks should have run
+	if _, err := os.Stat(configMarker); err != nil {
+		t.Fatalf("config post-run hook did not run: %v", err)
+	}
+	if _, err := os.Stat(cliMarker); err != nil {
+		t.Fatalf("cli post-run hook did not run: %v", err)
+	}
+}
+
+func TestCompactThreadDoesNotTriggerHooks(t *testing.T) {
+	setupThreadHome(t)
+
+	home := os.Getenv("HOME")
+	markerPath := filepath.Join(home, "compact_hook.txt")
+	hookScript := filepath.Join(home, "compact_hook.sh")
+	if err := os.WriteFile(hookScript, []byte("#!/bin/sh\necho fired > \"$1\"\n"), 0o755); err != nil {
+		t.Fatalf("write hook: %v", err)
+	}
+
+	b := fakeJSON("the-summary", "")
+	b.PostRunCmd = fmt.Sprintf("%s '%s'", hookScript, markerPath)
+	backends := map[string]Backend{"s": b}
+
+	turns := make([]Turn, 8)
+	for i := range turns {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		turns[i] = Turn{Role: role, Content: strings.Repeat("x", i+1)}
+	}
+
+	thread := &Thread{ID: "compact-hooks", Turns: turns, NativeSessions: map[string]string{}}
+	thread.Save()
+
+	if err := CompactThread(backends, "compact-hooks", "s"); err != nil {
+		t.Fatalf("compaction failed: %v", err)
+	}
+
+	// The hook should NOT have fired since CompactThread uses runDirect
+	if _, err := os.Stat(markerPath); !os.IsNotExist(err) {
+		t.Fatalf("hooks should not fire during CompactThread, stat err = %v", err)
 	}
 }
 

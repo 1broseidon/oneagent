@@ -40,6 +40,8 @@ Each backend is a JSON object with these fields:
 | `model` | no | Default model when none is passed at runtime |
 | `paths` | no | Additional directories to search for the CLI binary (supports `~`). Checked when the binary isn't in `$PATH` |
 | `prompt_stdin` | no | If `true`, pass the prompt via stdin instead of as a command-line argument. Keeps prompts out of `ps` output |
+| `pre_run` | no | Shell command to run before every invocation of this backend. Exit non-zero aborts the run |
+| `post_run` | no | Shell command to run after every invocation. Result piped to stdin. Best-effort |
 
 ## Template Variables
 

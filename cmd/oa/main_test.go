@@ -354,18 +354,22 @@ func TestVersionFlagOutputsBuildVersion(t *testing.T) {
 	}
 }
 
-func TestLoadRunContextIncludesOnComplete(t *testing.T) {
+func TestLoadRunContextIncludesHooks(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	_, opts := loadRunContext(cliOpts{
-		backend:    "claude",
-		thread:     "daily",
-		onComplete: "echo hook",
-		prompt:     []string{"summarize", "today"},
+		backend: "claude",
+		thread:  "daily",
+		preRun:  "echo before",
+		postRun: "echo after",
+		prompt:  []string{"summarize", "today"},
 	})
 
-	if opts.OnComplete != "echo hook" {
-		t.Fatalf("on_complete = %q, want %q", opts.OnComplete, "echo hook")
+	if opts.PreRunCmd != "echo before" {
+		t.Fatalf("pre_run = %q, want %q", opts.PreRunCmd, "echo before")
+	}
+	if opts.PostRunCmd != "echo after" {
+		t.Fatalf("post_run = %q, want %q", opts.PostRunCmd, "echo after")
 	}
 	if opts.ThreadID != "daily" {
 		t.Fatalf("thread_id = %q, want %q", opts.ThreadID, "daily")

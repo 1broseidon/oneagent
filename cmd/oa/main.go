@@ -20,7 +20,8 @@ type cliOpts struct {
 	stream     bool
 	thread     string
 	configPath string
-	onComplete string
+	preRun     string
+	postRun    string
 	prompt     []string
 }
 
@@ -33,7 +34,8 @@ func parseArgs(args []string) cliOpts {
 		"-s": &o.session, "--session": &o.session,
 		"-t": &o.thread, "--thread": &o.thread,
 		"-c": &o.configPath, "--config": &o.configPath,
-		"--on-complete": &o.onComplete,
+		"--pre-run":  &o.preRun,
+		"--post-run": &o.postRun,
 	}
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -95,6 +97,7 @@ func main() {
 
 func runPrompt(o cliOpts) {
 	o = readStdin(o)
+	o = readEnvPrompt(o)
 	validateRunPrompt(o)
 	backends, opts := loadRunContext(o)
 	dispatchPrompt(backends, opts, o)
@@ -120,6 +123,18 @@ func readStdin(o cliOpts) cliOpts {
 		o.prompt = []string{piped + "\n\n" + strings.Join(o.prompt, " ")}
 	} else {
 		o.prompt = []string{piped}
+	}
+	return o
+}
+
+// readEnvPrompt reads the prompt from OA_PROMPT when no prompt has been
+// provided via args or stdin. The env var keeps the prompt out of ps output.
+func readEnvPrompt(o cliOpts) cliOpts {
+	if len(o.prompt) > 0 {
+		return o
+	}
+	if v := os.Getenv("OA_PROMPT"); v != "" {
+		o.prompt = []string{v}
 	}
 	return o
 }
@@ -158,7 +173,8 @@ func loadRunContext(o cliOpts) (map[string]oneagent.Backend, oneagent.RunOpts) {
 		CWD:        o.cwd,
 		SessionID:  o.session,
 		ThreadID:   o.thread,
-		OnComplete: o.onComplete,
+		PreRunCmd:  o.preRun,
+		PostRunCmd: o.postRun,
 	}
 	return backends, opts
 }
@@ -169,19 +185,12 @@ func dispatchPrompt(backends map[string]oneagent.Backend, opts oneagent.RunOpts,
 		return
 	}
 
-	resp := runOnce(backends, opts)
+	resp := oneagent.Run(backends, opts)
 	if o.json {
 		writeJSONResponse(resp)
 		return
 	}
 	writeTextResponse(resp)
-}
-
-func runOnce(backends map[string]oneagent.Backend, opts oneagent.RunOpts) oneagent.Response {
-	if opts.ThreadID != "" {
-		return oneagent.RunWithThread(backends, opts)
-	}
-	return oneagent.Run(backends, opts)
 }
 
 func streamPrompt(backends map[string]oneagent.Backend, opts oneagent.RunOpts, jsonOutput bool) {
@@ -198,12 +207,7 @@ func streamPrompt(backends map[string]oneagent.Backend, opts oneagent.RunOpts, j
 		emit = writer.Emit
 	}
 
-	var resp oneagent.Response
-	if opts.ThreadID != "" {
-		resp = oneagent.RunWithThreadStream(backends, opts, emit)
-	} else {
-		resp = oneagent.RunStream(backends, opts, emit)
-	}
+	resp := oneagent.RunStream(backends, opts, emit)
 
 	if !jsonOutput {
 		writer.Finish(resp)
@@ -395,7 +399,8 @@ Flags:
   -v, --version                  Show binary version
   --json                         Emit machine-readable JSON output
   --jsonl                        Alias for --stream --json
-  --on-complete <cmd>            Run a command after a successful thread turn; result is sent to stdin
+  --pre-run <cmd>                Run a shell command before backend execution; exit non-zero aborts
+  --post-run <cmd>               Run a shell command after backend execution; result piped to stdin
   -s, --session <id>             Resume session (mutually exclusive with -t)
   --text                         Emit plain text output (default)
   --stream                       Stream live output while running

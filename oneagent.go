@@ -41,6 +41,8 @@ type Backend struct {
 	DefaultModel string
 	Paths        []string // additional directories to search for the CLI binary
 	PromptStdin  bool     // pass prompt via stdin instead of argv
+	PreRunCmd    string   // shell command to run before backend execution
+	PostRunCmd   string   // shell command to run after backend execution
 }
 
 // Response is the normalized output from any backend.
@@ -64,6 +66,12 @@ type StreamEvent struct {
 	Error    string `json:"error,omitempty"`
 }
 
+// HookContext is passed to the PostRun callback after a backend invocation completes.
+type HookContext struct {
+	Opts     RunOpts
+	Response Response
+}
+
 // Client is an embeddable oneagent runtime with configurable backends and thread store.
 type Client struct {
 	Backends map[string]Backend
@@ -79,7 +87,10 @@ type RunOpts struct {
 	SessionID  string
 	ThreadID   string
 	Source     string
-	OnComplete string
+	PreRun     func(*RunOpts) error // library callback: called before backend executes, can modify opts, return error to abort
+	PostRun    func(*HookContext)   // library callback: called after response, for side effects
+	PreRunCmd  string               // CLI shell command to run before backend execution
+	PostRunCmd string               // CLI shell command to run after backend execution
 }
 
 // ConfigDir returns the default config directory (~/.config/oneagent).
@@ -200,14 +211,236 @@ func RunStream(backends map[string]Backend, opts RunOpts, emit func(StreamEvent)
 
 // Run executes a prompt against the configured backends and returns a normalized response.
 func (c Client) Run(opts RunOpts) Response {
-	return c.run(opts, nil)
+	return c.invoke(opts, nil)
 }
 
 // RunStream executes a prompt and emits normalized streaming events as they arrive.
 func (c Client) RunStream(opts RunOpts, emit func(StreamEvent)) Response {
-	resp := c.run(opts, emit)
+	return c.invoke(opts, emit)
+}
+
+// runDirect executes a prompt without hooks or terminal event emission.
+// Used internally by CompactThread to avoid triggering hooks for internal calls.
+func (c Client) runDirect(opts RunOpts) Response {
+	return c.run(opts, nil)
+}
+
+// invoke is the full lifecycle wrapper for both threaded and non-threaded paths.
+// Execution order:
+//  1. Library PreRun callback (can modify RunOpts, error aborts)
+//  2. Thread preparation (if ThreadID is set)
+//  3. Config pre_run shell command (exit non-zero aborts)
+//  4. CLI pre_run shell command (exit non-zero aborts)
+//  5. Backend execution (run or runStream)
+//  6. Thread persistence (if ThreadID is set)
+//  7. Emit terminal stream event (done/error)
+//  8. Config post_run shell command
+//  9. CLI post_run shell command
+//  10. Library PostRun callback
+func (c Client) invoke(opts RunOpts, emit func(StreamEvent)) Response {
+	b, ok := c.Backends[opts.Backend]
+	if !ok {
+		resp := Response{Error: "backend not configured: " + opts.Backend, Backend: opts.Backend}
+		emitFinal(emit, finalEvent(resp))
+		return resp
+	}
+
+	// 1. Library PreRun callback, 2. Thread prep, 3-4. Shell pre-hooks
+	thread, original, model, err := c.invokePrePhase(&opts, b)
+	if err != nil {
+		resp := Response{Error: err.Error(), Backend: opts.Backend, ThreadID: opts.ThreadID}
+		emitFinal(emit, finalEvent(resp))
+		return resp
+	}
+
+	// 5. Backend execution (+ 6. thread persistence if threaded)
+	var resp Response
+	if thread != nil {
+		resp = c.runThreaded(opts, emit, thread, original)
+	} else {
+		resp = c.run(opts, emit)
+	}
+
+	// 7. Emit terminal stream event
 	emitFinal(emit, finalEvent(resp))
+
+	// 8-10. Post-run hooks and callback
+	c.invokePostPhase(opts, b, model, resp)
+
 	return resp
+}
+
+// invokePrePhase runs lifecycle steps 1-4: library callback, thread prep, shell pre-hooks.
+// Returns the thread (nil if non-threaded), original prompt, resolved model, and any abort error.
+func (c Client) invokePrePhase(opts *RunOpts, b Backend) (*Thread, string, string, error) {
+	// 1. Library PreRun callback
+	if opts.PreRun != nil {
+		if err := opts.PreRun(opts); err != nil {
+			return nil, "", "", fmt.Errorf("pre-run callback: %w", err)
+		}
+	}
+
+	// 2. Thread preparation
+	var thread *Thread
+	var original string
+	if opts.ThreadID != "" {
+		var err error
+		thread, err = c.threadStore().LoadThread(opts.ThreadID)
+		if err != nil {
+			return nil, "", "", err
+		}
+		original = prepareThreadPrompt(thread, opts)
+	}
+
+	model := opts.Model
+	if model == "" {
+		model = b.DefaultModel
+	}
+
+	// 3. Config pre_run shell command
+	if b.PreRunCmd != "" {
+		if err := runPreHook(b.PreRunCmd, hookEnvPre(*opts, model)); err != nil {
+			return nil, "", "", fmt.Errorf("config pre_run hook: %w", err)
+		}
+	}
+
+	// 4. CLI pre_run shell command
+	if opts.PreRunCmd != "" {
+		if err := runPreHook(opts.PreRunCmd, hookEnvPre(*opts, model)); err != nil {
+			return nil, "", "", fmt.Errorf("cli pre_run hook: %w", err)
+		}
+	}
+
+	return thread, original, model, nil
+}
+
+// invokePostPhase runs lifecycle steps 8-10: config post-hook, CLI post-hook, library callback.
+func (c Client) invokePostPhase(opts RunOpts, b Backend, model string, resp Response) {
+	// 8. Config post_run shell command
+	if b.PostRunCmd != "" {
+		runPostHook(b.PostRunCmd, hookEnvPost(opts, model, resp), resp.Result)
+	}
+
+	// 9. CLI post_run shell command
+	if opts.PostRunCmd != "" {
+		runPostHook(opts.PostRunCmd, hookEnvPost(opts, model, resp), resp.Result)
+	}
+
+	// 10. Library PostRun callback
+	if opts.PostRun != nil {
+		opts.PostRun(&HookContext{Opts: opts, Response: resp})
+	}
+}
+
+// runThreaded handles thread preparation and persistence around the core run.
+// Steps 2 (load) and 6 (persist) from the invoke lifecycle.
+func (c Client) runThreaded(opts RunOpts, emit func(StreamEvent), thread *Thread, original string) Response {
+	var streamSaveErr error
+	resp := c.run(opts, func(event StreamEvent) {
+		event.ThreadID = opts.ThreadID
+		if event.Type == "session" && event.Session != "" {
+			thread.NativeSessions[opts.Backend] = event.Session
+			if err := c.threadStore().SaveThread(thread); err != nil && streamSaveErr == nil {
+				streamSaveErr = err
+			}
+		}
+		emitEvent(emit, event)
+	})
+	if streamSaveErr != nil {
+		resp.Error = "thread save failed: " + streamSaveErr.Error()
+	}
+
+	// 6. Thread persistence
+	thread.recordTurns(original, resp, opts.Source)
+	if err := c.threadStore().SaveThread(thread); err != nil {
+		resp.Error = "thread save failed: " + err.Error()
+	}
+	resp.ThreadID = opts.ThreadID
+	return resp
+}
+
+// hookEnvPre builds environment variables for pre-run shell hooks.
+func hookEnvPre(opts RunOpts, model string) []string {
+	env := os.Environ()
+	env = append(env,
+		"OA_BACKEND="+opts.Backend,
+		"OA_MODEL="+model,
+	)
+	if opts.ThreadID != "" {
+		env = append(env, "OA_THREAD_ID="+opts.ThreadID)
+	}
+	if opts.Source != "" {
+		env = append(env, "OA_SOURCE="+opts.Source)
+	}
+	if opts.CWD != "" {
+		env = append(env, "OA_CWD="+opts.CWD)
+	}
+	return env
+}
+
+// hookEnvPost builds environment variables for post-run shell hooks.
+func hookEnvPost(opts RunOpts, model string, resp Response) []string {
+	env := hookEnvPre(opts, model)
+	env = append(env, "OA_SESSION="+resp.Session)
+	exitCode := "0"
+	errMsg := ""
+	if resp.Error != "" {
+		exitCode = "1"
+		errMsg = resp.Error
+	}
+	env = append(env,
+		"OA_ERROR="+errMsg,
+		"OA_EXIT="+exitCode,
+	)
+	return env
+}
+
+// runPreHook executes a pre-run shell command. Non-zero exit aborts the run.
+func runPreHook(cmdStr string, env []string) error {
+	args, err := tokenize(cmdStr)
+	if err != nil {
+		return fmt.Errorf("tokenize: %w", err)
+	}
+	if len(args) == 0 {
+		return fmt.Errorf("empty command")
+	}
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Env = env
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if s := strings.TrimSpace(stderr.String()); s != "" {
+			return fmt.Errorf("%s: %w", s, err)
+		}
+		return err
+	}
+	return nil
+}
+
+// runPostHook executes a post-run shell command. Errors are logged but do not
+// affect the response (best-effort).
+func runPostHook(cmdStr string, env []string, result string) {
+	args, err := tokenize(cmdStr)
+	if err != nil {
+		log.Printf("post-run hook tokenize failed: %v", err)
+		return
+	}
+	if len(args) == 0 {
+		log.Printf("post-run hook command is empty")
+		return
+	}
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Stdin = strings.NewReader(result)
+	cmd.Env = env
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if s := strings.TrimSpace(stderr.String()); s != "" {
+			log.Printf("post-run hook failed: %v: %s", err, s)
+			return
+		}
+		log.Printf("post-run hook failed: %v", err)
+	}
 }
 
 func (c Client) run(opts RunOpts, emit func(StreamEvent)) Response {
