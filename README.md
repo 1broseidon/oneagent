@@ -1,5 +1,7 @@
 # oneagent
 
+[![GitHub Stars](https://img.shields.io/github/stars/1broseidon/oneagent?style=social)](https://github.com/1broseidon/oneagent/stargazers)
+
 Config-driven multi-agent CLI.
 
 `oa` gives Claude, Codex, OpenCode, Pi, and any future agent CLI a single normalized interface. Every backend gets the same flags, the same JSON and streaming output, and portable conversation threads. Adding a new agent is a JSON config edit — no code required.
