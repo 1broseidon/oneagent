@@ -80,7 +80,7 @@ Numeric path segments index into arrays, so `.0.` is valid.
 
 ## Example Backends
 
-These are the embedded defaults that ship with `oa`. Each uses the minimum flags needed for non-interactive execution with full tool access. Claude's `-p` mode only allows reads, so `--dangerously-skip-permissions` is required for writes and bash. Codex's `--dangerously-bypass-approvals-and-sandbox` disables the bubblewrap sandbox which fails on some kernels. Pi and OpenCode have no permission restrictions in non-interactive mode. Override any of these in `~/.config/oneagent/backends.json` if you need different flags.
+These are the embedded defaults that ship with `oa`. All backends use `prompt_stdin` to pass prompts via stdin instead of command-line arguments, keeping prompt content out of `ps` output. Claude's `-p` mode only allows reads, so `--dangerously-skip-permissions` is required for writes and bash. Codex's `--dangerously-bypass-approvals-and-sandbox` disables the bubblewrap sandbox which fails on some kernels. Pi and OpenCode have no permission restrictions in non-interactive mode. Override any of these in `~/.config/oneagent/backends.json` if you need different flags.
 
 **Claude:**
 
@@ -89,6 +89,7 @@ These are the embedded defaults that ship with `oa`. Each uses the minimum flags
   "run": "claude -p {prompt} --model {model} --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions",
   "resume": "+ --resume {session}",
   "format": "jsonl",
+  "prompt_stdin": true,
   "activity": "{message.content.0.name} {message.content.0.input.file_path}",
   "activity_when": "type=assistant&message.content.0.type=tool_use",
   "delta": "event.delta.text",
@@ -99,7 +100,8 @@ These are the embedded defaults that ship with `oa`. Each uses the minimum flags
   "session_when": "type=system",
   "error": "result",
   "error_when": "type=result&is_error=true",
-  "model": "sonnet"
+  "model": "sonnet",
+  "paths": ["~/.claude/local", "~/.local/bin", "~/.npm-global/bin"]
 }
 ```
 
@@ -107,9 +109,10 @@ These are the embedded defaults that ship with `oa`. Each uses the minimum flags
 
 ```json
 {
-  "run": "codex exec {prompt} --json --dangerously-bypass-approvals-and-sandbox -C {cwd} --skip-git-repo-check",
-  "resume": "codex exec resume {session} {prompt} --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check",
+  "run": "codex exec - --json --dangerously-bypass-approvals-and-sandbox -C {cwd} --skip-git-repo-check",
+  "resume": "codex exec resume {session} - --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check",
   "format": "jsonl",
+  "prompt_stdin": true,
   "activity": "{item.command}",
   "activity_when": "type=item.started&item.type=command_execution",
   "delta": "assistantMessageEvent.delta",
@@ -119,7 +122,8 @@ These are the embedded defaults that ship with `oa`. Each uses the minimum flags
   "session": "thread_id",
   "session_when": "type=thread.started",
   "error": "message",
-  "error_when": "type=error"
+  "error_when": "type=error",
+  "paths": ["~/.local/bin", "~/.npm-global/bin"]
 }
 ```
 
@@ -130,6 +134,7 @@ These are the embedded defaults that ship with `oa`. Each uses the minimum flags
   "run": "opencode run {prompt} --format json --dir {cwd} --model {model}",
   "resume": "+ --session {session}",
   "format": "jsonl",
+  "prompt_stdin": true,
   "activity": "{part.tool} {part.state.input.filePath}",
   "activity_when": "type=tool_use",
   "result": "part.text",
@@ -137,7 +142,8 @@ These are the embedded defaults that ship with `oa`. Each uses the minimum flags
   "session": "sessionID",
   "session_when": "type=step_start",
   "error": "part.text",
-  "error_when": "type=error"
+  "error_when": "type=error",
+  "paths": ["~/.opencode/bin", "~/.local/bin"]
 }
 ```
 
@@ -148,6 +154,7 @@ These are the embedded defaults that ship with `oa`. Each uses the minimum flags
   "run": "pi -p {prompt} --mode json --model {model}",
   "resume": "+ --session {session}",
   "format": "jsonl",
+  "prompt_stdin": true,
   "activity": "{assistantMessageEvent.toolCall.name} {assistantMessageEvent.toolCall.arguments.path}",
   "activity_when": "type=message_update&assistantMessageEvent.type=toolcall_end",
   "result": "assistantMessageEvent.delta",
@@ -156,6 +163,7 @@ These are the embedded defaults that ship with `oa`. Each uses the minimum flags
   "session": "id",
   "session_when": "type=session",
   "error": "message",
-  "error_when": "type=error"
+  "error_when": "type=error",
+  "paths": ["~/.local/bin", "~/.npm-global/bin"]
 }
 ```

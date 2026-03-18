@@ -2,6 +2,12 @@
 
 All notable changes to oneagent are documented here.
 
+## [0.10.7] - 2026-03-18
+
+### Added
+
+- `prompt_stdin` config field — pass prompts via stdin instead of command-line arguments, keeping prompt content out of `ps` output. All four embedded backends now use this by default.
+
 ## [0.10.6] - 2026-03-17
 
 ### Added
