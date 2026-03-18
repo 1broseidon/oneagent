@@ -24,7 +24,8 @@ type backendConfig struct {
 	SessionWhen  string   `json:"session_when,omitempty"`
 	Error        string   `json:"error,omitempty"`
 	ErrorWhen    string   `json:"error_when,omitempty"`
-	Paths        []string `json:"paths,omitempty"`
+	Paths       []string `json:"paths,omitempty"`
+	PromptStdin bool     `json:"prompt_stdin,omitempty"`
 }
 
 // compileBackend converts a backendConfig into the canonical Backend struct.
@@ -45,6 +46,7 @@ func compileBackend(c backendConfig) (Backend, error) {
 		ErrorWhen:    c.ErrorWhen,
 		DefaultModel: c.Model,
 		Paths:        c.Paths,
+		PromptStdin:  c.PromptStdin,
 	}
 
 	if err := compileCommands(&b, c); err != nil {

@@ -39,6 +39,7 @@ Each backend is a JSON object with these fields:
 | `error_when` | no | Match condition for error events |
 | `model` | no | Default model when none is passed at runtime |
 | `paths` | no | Additional directories to search for the CLI binary (supports `~`). Checked when the binary isn't in `$PATH` |
+| `prompt_stdin` | no | If `true`, pass the prompt via stdin instead of as a command-line argument. Keeps prompts out of `ps` output |
 
 ## Template Variables
 

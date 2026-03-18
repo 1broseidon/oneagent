@@ -3,6 +3,7 @@
     "run": "claude -p {prompt} --model {model} --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions",
     "resume": "+ --resume {session}",
     "format": "jsonl",
+    "prompt_stdin": true,
     "activity": "{message.content.0.name} {message.content.0.input.file_path}",
     "activity_when": "type=assistant&message.content.0.type=tool_use",
     "delta": "event.delta.text",
@@ -17,10 +18,10 @@
     "paths": ["~/.claude/local", "~/.local/bin", "~/.npm-global/bin"]
   },
   "codex": {
-    "run": "codex exec {prompt} --json --dangerously-bypass-approvals-and-sandbox -C {cwd} --skip-git-repo-check",
-    "resume": "codex exec resume {session} {prompt} --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check",
-    "paths": ["~/.local/bin", "~/.npm-global/bin"],
+    "run": "codex exec - --json --dangerously-bypass-approvals-and-sandbox -C {cwd} --skip-git-repo-check",
+    "resume": "codex exec resume {session} - --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check",
     "format": "jsonl",
+    "prompt_stdin": true,
     "activity": "{item.command}",
     "activity_when": "type=item.started&item.type=command_execution",
     "delta": "assistantMessageEvent.delta",
@@ -30,12 +31,14 @@
     "session": "thread_id",
     "session_when": "type=thread.started",
     "error": "message",
-    "error_when": "type=error"
+    "error_when": "type=error",
+    "paths": ["~/.local/bin", "~/.npm-global/bin"]
   },
   "opencode": {
     "run": "opencode run {prompt} --format json --dir {cwd} --model {model}",
     "resume": "+ --session {session}",
     "format": "jsonl",
+    "prompt_stdin": true,
     "activity": "{part.tool} {part.state.input.filePath}",
     "activity_when": "type=tool_use",
     "result": "part.text",
@@ -50,6 +53,7 @@
     "run": "pi -p {prompt} --mode json --model {model}",
     "resume": "+ --session {session}",
     "format": "jsonl",
+    "prompt_stdin": true,
     "activity": "{assistantMessageEvent.toolCall.name} {assistantMessageEvent.toolCall.arguments.path}",
     "activity_when": "type=message_update&assistantMessageEvent.type=toolcall_end",
     "result": "assistantMessageEvent.delta",

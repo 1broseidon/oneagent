@@ -40,6 +40,7 @@ type Backend struct {
 	ErrorWhen    string
 	DefaultModel string
 	Paths        []string // additional directories to search for the CLI binary
+	PromptStdin  bool     // pass prompt via stdin instead of argv
 }
 
 // Response is the normalized output from any backend.
@@ -154,8 +155,13 @@ func buildCmd(b Backend, opts RunOpts) (*exec.Cmd, error) {
 		prompt = b.SystemPrompt + "\n\n" + opts.Prompt
 	}
 
+	argPrompt := prompt
+	if b.PromptStdin {
+		argPrompt = "" // drop {prompt} from argv; will be piped to stdin
+	}
+
 	vars := map[string]string{
-		"prompt":  prompt,
+		"prompt":  argPrompt,
 		"model":   model,
 		"cwd":     opts.CWD,
 		"session": opts.SessionID,
@@ -176,6 +182,9 @@ func buildCmd(b Backend, opts RunOpts) (*exec.Cmd, error) {
 		cmd.Dir = opts.CWD
 	}
 	cmd.Env = os.Environ()
+	if b.PromptStdin {
+		cmd.Stdin = strings.NewReader(prompt)
+	}
 	return cmd, nil
 }
 
