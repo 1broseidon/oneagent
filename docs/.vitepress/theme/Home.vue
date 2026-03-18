@@ -9,15 +9,23 @@ const features = [
   },
   {
     title: 'Portable Threads',
-    description: 'Start a conversation on Claude, continue on Codex, summarize on Pi. Thread history follows across backends.',
+    description: 'Start a conversation on Claude, continue on Codex, summarize on Pi. Thread history follows across backends, with file locking for concurrent access.',
   },
   {
     title: 'Zero-Code Backends',
-    description: 'Adding a new agent is a JSON config edit. Define the CLI command, map the output fields, done.',
+    description: 'Adding a new agent is a JSON config edit. Define the CLI command, map the output fields, done. No SDK, no code changes.',
+  },
+  {
+    title: 'Pipes & Chains',
+    description: 'Pipe content into any agent as context. Chain agents sequentially with && and shared threads for multi-step workflows.',
+  },
+  {
+    title: 'Hooks',
+    description: 'Pre and post-run hooks at three layers: Go callbacks, per-backend config, and CLI flags. Set up worktrees, notify Slack, audit log — all composable.',
   },
   {
     title: 'Agent-as-Tool',
-    description: 'Dispatch work from one agent to another. Normalized results back, chain follow-ups across models.',
+    description: 'Dispatch work from one agent to another. Run oa from inside Claude Code, a cron job, or a CI pipeline. Includes an installable agent skill.',
   },
 ]
 </script>
@@ -84,19 +92,20 @@ const features = [
         <div class="section-divider"></div>
       </div>
       <div class="code-block">
-        <pre><code><span class="code-comment"># Talk to Claude (the default backend)</span>
+        <pre><code><span class="code-comment"># Talk to any agent, same interface</span>
 oa "explain this codebase"
-
-<span class="code-comment"># Use a different backend</span>
 oa -b codex "fix the auth bug"
 
-<span class="code-comment"># Portable threads — start on one backend, continue on another</span>
-oa -t auth-fix "investigate the failing auth tests"
-oa -b codex -t auth-fix "patch the bug"
-oa -b claude -t auth-fix "summarize what changed"
+<span class="code-comment"># Pipe content as context</span>
+git diff | oa -b claude "review these changes"
 
-<span class="code-comment"># Machine-readable JSON output</span>
-oa --json "explain this codebase"</code></pre>
+<span class="code-comment"># Chain agents with shared threads</span>
+oa -b codex -t feat "implement the feature" && \
+oa -b claude -t feat "review and fix issues" && \
+git diff | oa -b claude "write a changelog entry"
+
+<span class="code-comment"># Hooks for notifications, setup, teardown</span>
+oa -b codex --post-run 'notify-send "oa" "Done: $(head -c 100)"' "fix the bug"</code></pre>
       </div>
     </section>
 
