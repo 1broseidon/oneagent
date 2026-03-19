@@ -10,9 +10,28 @@ import (
 	"github.com/1broseidon/oneagent"
 )
 
-func TestThreadCompactUsesExplicitConfigPath(t *testing.T) {
+// isolateHome sets HOME to a temp dir while preserving GOPATH and GOMODCACHE
+// so that `go run` does not re-download modules into the temp dir.
+func isolateHome(t *testing.T) string {
+	t.Helper()
+	realHome := os.Getenv("HOME")
+	gopath := os.Getenv("GOPATH")
+	gomodcache := os.Getenv("GOMODCACHE")
+
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+
+	if gopath == "" {
+		t.Setenv("GOPATH", filepath.Join(realHome, "go"))
+	}
+	if gomodcache == "" {
+		t.Setenv("GOMODCACHE", filepath.Join(realHome, "go", "pkg", "mod"))
+	}
+	return home
+}
+
+func TestThreadCompactUsesExplicitConfigPath(t *testing.T) {
+	home := isolateHome(t)
 
 	thread := &oneagent.Thread{
 		ID: "compact-config",
@@ -78,8 +97,7 @@ func TestResolveBackendProgramHandlesEmptyCmd(t *testing.T) {
 }
 
 func TestListUsesEmbeddedDefaultsWithoutUserConfig(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	_ = isolateHome(t)
 
 	cmd := exec.Command("go", "run", ".", "list")
 	cmd.Dir = "."
@@ -96,8 +114,7 @@ func TestListUsesEmbeddedDefaultsWithoutUserConfig(t *testing.T) {
 }
 
 func TestSkillsListUsesEmbeddedDefaults(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	_ = isolateHome(t)
 
 	cmd := exec.Command("go", "run", ".", "skills", "list")
 	cmd.Dir = "."
@@ -118,8 +135,7 @@ func TestSkillsListUsesEmbeddedDefaults(t *testing.T) {
 }
 
 func TestSkillsShowPrintsWrappedBody(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	_ = isolateHome(t)
 
 	cmd := exec.Command("go", "run", ".", "skills", "show", "dispatch")
 	cmd.Dir = "."
@@ -144,8 +160,7 @@ func TestSkillsShowPrintsWrappedBody(t *testing.T) {
 }
 
 func TestSkillsShowMissingSkillFails(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	_ = isolateHome(t)
 
 	cmd := exec.Command("go", "run", ".", "skills", "show", "missing-skill")
 	cmd.Dir = "."
@@ -159,9 +174,8 @@ func TestSkillsShowMissingSkillFails(t *testing.T) {
 }
 
 func TestSkillsListHonorsCWDForProjectSkills(t *testing.T) {
-	home := t.TempDir()
+	_ = isolateHome(t)
 	project := t.TempDir()
-	t.Setenv("HOME", home)
 
 	writeSkillFile(t, filepath.Join(project, ".agents", "skills", "my-skill"), `---
 name: my-skill
@@ -188,9 +202,8 @@ description: Project custom skill.
 }
 
 func TestSkillsShowListsCustomResources(t *testing.T) {
-	home := t.TempDir()
+	_ = isolateHome(t)
 	project := t.TempDir()
-	t.Setenv("HOME", home)
 
 	skillDir := filepath.Join(project, ".agents", "skills", "resource-skill")
 	writeSkillFile(t, skillDir, `---
@@ -224,8 +237,7 @@ description: Skill with bundled resources.
 }
 
 func TestListHonorsExplicitConfigPath(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := isolateHome(t)
 
 	configPath := filepath.Join(home, "backends.json")
 	configJSON := []byte(`{
@@ -266,8 +278,7 @@ func writeSkillFile(t *testing.T, dir, content string) {
 }
 
 func TestDefaultPromptOutputsText(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := isolateHome(t)
 
 	scriptPath := filepath.Join(home, "resp.sh")
 	script := "#!/bin/sh\n" +
@@ -301,8 +312,7 @@ func TestDefaultPromptOutputsText(t *testing.T) {
 }
 
 func TestJSONFlagOutputsJSON(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := isolateHome(t)
 
 	scriptPath := filepath.Join(home, "resp.sh")
 	script := "#!/bin/sh\n" +
@@ -336,8 +346,7 @@ func TestJSONFlagOutputsJSON(t *testing.T) {
 }
 
 func TestStreamOutputsTextByDefault(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := isolateHome(t)
 
 	scriptPath := filepath.Join(home, "stream.sh")
 	script := "#!/bin/sh\n" +
@@ -383,8 +392,7 @@ func TestStreamOutputsTextByDefault(t *testing.T) {
 }
 
 func TestStreamOutputsNormalizedJSONL(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := isolateHome(t)
 
 	scriptPath := filepath.Join(home, "stream.sh")
 	script := "#!/bin/sh\n" +
@@ -436,8 +444,7 @@ func TestStreamOutputsNormalizedJSONL(t *testing.T) {
 }
 
 func TestJSONLAliasOutputsNormalizedJSONL(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := isolateHome(t)
 
 	scriptPath := filepath.Join(home, "stream.sh")
 	script := "#!/bin/sh\n" +
@@ -493,7 +500,7 @@ func TestVersionFlagOutputsBuildVersion(t *testing.T) {
 }
 
 func TestLoadRunContextIncludesHooks(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	_ = isolateHome(t)
 
 	_, opts := loadRunContext(cliOpts{
 		backend: "claude",
