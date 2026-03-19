@@ -2,6 +2,16 @@
 
 All notable changes to oneagent are documented here.
 
+## [0.11.2] - 2026-03-19
+
+### Fixed
+
+- Activity events for claude, opencode, and pi backends now include tool context (description, command, title) instead of just the tool name.
+
+### Changed
+
+- `oa-dispatch` skill uses pipe form for all prompts.
+
 ## [0.11.1] - 2026-03-18
 
 ### Fixed
