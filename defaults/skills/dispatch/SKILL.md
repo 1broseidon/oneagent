@@ -92,24 +92,27 @@ If the first dispatch misses the target, send a narrower follow-up prompt with t
 
 ## Passing skills to dispatched agents
 
-Run `oa skills list` to see available skills. If a dispatched task would benefit from a skill, pass it with `--skills`:
+By default, no skills are injected — dispatched agents get zero skill overhead. Only pass skills when the task genuinely needs them.
+
+Before dispatching, consider: does this task need specialized instructions the agent wouldn't already know? If it's a simple edit or test run, skip `--skills` entirely.
+
+When skills are needed, be selective — pass only the specific skills the task requires:
 
 ```bash
-# Inject the catalog so the agent can discover and load skills on demand
-cat <<'EOF' | oa -b codex --skills --jsonl
-Refactor the auth module and add tests.
+# The agent needs to know how to delegate sub-tasks
+cat <<'EOF' | oa -b claude --skills dispatch --jsonl
+Break this refactor into smaller tasks and dispatch each to codex.
 EOF
 
-# Inject specific skill bodies inline — the agent gets the instructions immediately
-cat <<'EOF' | oa -b claude --skills dispatch --jsonl
-Use the dispatch skill to delegate the test writing to codex.
+# The agent needs two specific skills
+cat <<'EOF' | oa -b codex --skills dispatch,docx --jsonl
+Generate the report document, then dispatch the review to claude.
 EOF
 ```
 
-- `--skills` (bare) injects a lightweight catalog of skill names and descriptions
-- `--skills name1,name2` injects full skill bodies inline — use when you know what the agent needs
+Avoid `--skills` (bare catalog mode) unless the agent truly needs to discover skills on its own. The catalog adds ~50-100 tokens per installed skill. For most dispatched tasks, you already know which skills apply — pass them by name instead.
 
-Without `--skills`, no skill content is injected. This keeps simple tasks token-efficient.
+Run `oa skills list` to see what's available before choosing which to pass.
 
 ## Constraints to keep in mind
 
