@@ -88,12 +88,7 @@ func TestNewThreadCreatesFileAndRecordsTurns(t *testing.T) {
 		t.Fatalf("unexpected error: %s", resp.Error)
 	}
 
-	// Verify file exists.
-	path := filepath.Join(ThreadDir(), "t1.json")
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("thread file not created: %v", err)
-	}
-
+	assertThreadFileExists(t, "t1")
 	thread, err := LoadThread("t1")
 	if err != nil {
 		t.Fatalf("load: %v", err)
@@ -101,18 +96,8 @@ func TestNewThreadCreatesFileAndRecordsTurns(t *testing.T) {
 	if len(thread.Turns) != 2 {
 		t.Fatalf("turns = %d, want 2", len(thread.Turns))
 	}
-	if thread.Turns[0].Role != "user" || thread.Turns[0].Content != "first" {
-		t.Fatalf("turn[0] = %+v, want user/first", thread.Turns[0])
-	}
-	if thread.Turns[0].Source != "telegram" {
-		t.Fatalf("turn[0].source = %q, want telegram", thread.Turns[0].Source)
-	}
-	if thread.Turns[1].Role != "assistant" {
-		t.Fatalf("turn[1].role = %q, want assistant", thread.Turns[1].Role)
-	}
-	if thread.Turns[1].Source != "telegram" {
-		t.Fatalf("turn[1].source = %q, want telegram", thread.Turns[1].Source)
-	}
+	assertTurn(t, thread.Turns[0], "user", "first", "telegram")
+	assertTurn(t, thread.Turns[1], "assistant", "ok", "telegram")
 }
 
 func TestFilesystemStoreUsesCustomDir(t *testing.T) {
@@ -797,12 +782,7 @@ func TestLoadThreadCorruptFile(t *testing.T) {
 
 func TestAtomicSave(t *testing.T) {
 	store := FilesystemStore{Dir: t.TempDir()}
-	original := &Thread{
-		ID:             "atomic",
-		Summary:        "before",
-		Turns:          []Turn{{Role: "user", Content: "hello"}},
-		NativeSessions: map[string]string{"a": "s1"},
-	}
+	original := threadFixture("atomic", "before", []Turn{{Role: "user", Content: "hello"}}, map[string]string{"a": "s1"})
 	if err := store.SaveThread(original); err != nil {
 		t.Fatalf("initial save: %v", err)
 	}
@@ -817,16 +797,14 @@ func TestAtomicSave(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load with stale temp file: %v", err)
 	}
-	if loaded.Summary != "before" || loaded.NativeSessions["a"] != "s1" {
-		t.Fatalf("final thread changed unexpectedly: %+v", loaded)
-	}
+	assertThreadSnapshot(t, loaded, "before", "s1", 1)
 
-	updated := &Thread{
-		ID:             "atomic",
-		Summary:        "after",
-		Turns:          append(loaded.Turns, Turn{Role: "assistant", Content: "world"}),
-		NativeSessions: map[string]string{"a": "s2"},
-	}
+	updated := threadFixture(
+		"atomic",
+		"after",
+		append(loaded.Turns, Turn{Role: "assistant", Content: "world"}),
+		map[string]string{"a": "s2"},
+	)
 	if err := store.SaveThread(updated); err != nil {
 		t.Fatalf("save with stale temp file present: %v", err)
 	}
@@ -835,11 +813,47 @@ func TestAtomicSave(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load after atomic save: %v", err)
 	}
-	if after.Summary != "after" || after.NativeSessions["a"] != "s2" || len(after.Turns) != 2 {
-		t.Fatalf("unexpected saved thread: %+v", after)
+	assertThreadSnapshot(t, after, "after", "s2", 2)
+	assertMissingFile(t, tmpPath)
+}
+
+func assertThreadFileExists(t *testing.T, id string) {
+	t.Helper()
+	if _, err := os.Stat(filepath.Join(ThreadDir(), id+".json")); err != nil {
+		t.Fatalf("thread file not created: %v", err)
 	}
-	if _, err := os.Stat(tmpPath); !os.IsNotExist(err) {
-		t.Fatalf("temp file should be cleaned up, stat err = %v", err)
+}
+
+func assertTurn(t *testing.T, turn Turn, role, content, source string) {
+	t.Helper()
+	if turn.Role != role || turn.Content != content {
+		t.Fatalf("turn = %+v, want role=%q content=%q", turn, role, content)
+	}
+	if turn.Source != source {
+		t.Fatalf("turn source = %q, want %q", turn.Source, source)
+	}
+}
+
+func threadFixture(id, summary string, turns []Turn, sessions map[string]string) *Thread {
+	return &Thread{
+		ID:             id,
+		Summary:        summary,
+		Turns:          turns,
+		NativeSessions: sessions,
+	}
+}
+
+func assertThreadSnapshot(t *testing.T, thread *Thread, summary, session string, turns int) {
+	t.Helper()
+	if thread.Summary != summary || thread.NativeSessions["a"] != session || len(thread.Turns) != turns {
+		t.Fatalf("unexpected thread: %+v", thread)
+	}
+}
+
+func assertMissingFile(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("file should be absent, stat err = %v", err)
 	}
 }
 

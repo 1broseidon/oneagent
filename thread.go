@@ -86,7 +86,7 @@ func (s FilesystemStore) LoadThread(id string) (*Thread, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if err := flockShared(f.Fd()); err != nil {
 		return nil, err
 	}
@@ -119,40 +119,72 @@ func (c Client) SaveThread(t *Thread) error {
 
 // SaveThread writes the thread to disk, creating the directory if needed.
 func (s FilesystemStore) SaveThread(t *Thread) error {
-	if err := validateThreadID(t.ID); err != nil {
+	data, path, err := s.prepareThreadSave(t)
+	if err != nil {
 		return err
+	}
+	return saveThreadFile(path, data)
+}
+
+func (s FilesystemStore) prepareThreadSave(t *Thread) ([]byte, string, error) {
+	if err := validateThreadID(t.ID); err != nil {
+		return nil, "", err
 	}
 	dir := s.dir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
+		return nil, "", err
 	}
 	data, err := json.MarshalIndent(t, "", "  ")
 	if err != nil {
-		return err
+		return nil, "", err
 	}
-	path := filepath.Join(dir, t.ID+".json")
-	tmpPath := path + ".tmp"
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
+	return data, filepath.Join(dir, t.ID+".json"), nil
+}
+
+func saveThreadFile(path string, data []byte) error {
+	f, err := openLockedThreadFile(path)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	if err := flockExcl(f.Fd()); err != nil {
-		return err
+	defer closeLockedThreadFile(f)
+	return writeThreadTempFile(path, data)
+}
+
+func openLockedThreadFile(path string) (*os.File, error) {
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
+	if err != nil {
+		return nil, err
 	}
-	defer func() {
-		_ = flockUnlock(f.Fd())
-	}()
+	if err := flockExcl(f.Fd()); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return f, nil
+}
+
+func closeLockedThreadFile(f *os.File) {
+	_ = flockUnlock(f.Fd())
+	_ = f.Close()
+}
+
+func writeThreadTempFile(path string, data []byte) error {
+	tmpPath := path + ".tmp"
 	tmp, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
 	}
-	removeTmp := true
-	defer func() {
-		if removeTmp {
-			_ = os.Remove(tmpPath)
-		}
-	}()
+	if err := writeAndCloseTempFile(tmp, data); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	return nil
+}
+
+func writeAndCloseTempFile(tmp *os.File, data []byte) error {
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		return err
@@ -161,14 +193,7 @@ func (s FilesystemStore) SaveThread(t *Thread) error {
 		_ = tmp.Close()
 		return err
 	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return err
-	}
-	removeTmp = false
-	return nil
+	return tmp.Close()
 }
 
 // CompileContext builds a context string from the thread's history within a byte budget.

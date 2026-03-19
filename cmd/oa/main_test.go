@@ -95,6 +95,134 @@ func TestListUsesEmbeddedDefaultsWithoutUserConfig(t *testing.T) {
 	}
 }
 
+func TestSkillsListUsesEmbeddedDefaults(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cmd := exec.Command("go", "run", ".", "skills", "list")
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("oa skills list should succeed, got err=%v output=%s", err, out)
+	}
+
+	text := string(out)
+	for _, name := range []string{"dispatch", "mcp-tools"} {
+		if !strings.Contains(text, name) {
+			t.Fatalf("oa skills list output missing %q:\n%s", name, out)
+		}
+	}
+	if !strings.Contains(text, "(built-in)") {
+		t.Fatalf("oa skills list output missing built-in source:\n%s", out)
+	}
+}
+
+func TestSkillsShowPrintsWrappedBody(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cmd := exec.Command("go", "run", ".", "skills", "show", "dispatch")
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("oa skills show should succeed, got err=%v output=%s", err, out)
+	}
+
+	text := string(out)
+	if !strings.Contains(text, `<skill_content name="dispatch">`) {
+		t.Fatalf("oa skills show output missing wrapper:\n%s", out)
+	}
+	if !strings.Contains(text, "# Dispatch") {
+		t.Fatalf("oa skills show output missing body:\n%s", out)
+	}
+	if !strings.Contains(text, "Skill directory: defaults/skills/dispatch") {
+		t.Fatalf("oa skills show output missing skill directory:\n%s", out)
+	}
+	if !strings.Contains(text, "<skill_resources>") || !strings.Contains(text, "</skill_content>") {
+		t.Fatalf("oa skills show output missing resource wrapper:\n%s", out)
+	}
+}
+
+func TestSkillsShowMissingSkillFails(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cmd := exec.Command("go", "run", ".", "skills", "show", "missing-skill")
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("oa skills show missing skill should fail, output=%s", out)
+	}
+	if !strings.Contains(string(out), "skill not found: missing-skill") {
+		t.Fatalf("oa skills show missing skill output = %q", out)
+	}
+}
+
+func TestSkillsListHonorsCWDForProjectSkills(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeSkillFile(t, filepath.Join(project, ".agents", "skills", "my-skill"), `---
+name: my-skill
+description: Project custom skill.
+---
+
+# My Skill
+`)
+
+	cmd := exec.Command("go", "run", ".", "skills", "list", "-C", project)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("oa skills list -C should succeed, got err=%v output=%s", err, out)
+	}
+
+	text := string(out)
+	if !strings.Contains(text, "my-skill") {
+		t.Fatalf("oa skills list -C output missing custom skill:\n%s", out)
+	}
+	if !strings.Contains(text, "(.agents/skills/)") {
+		t.Fatalf("oa skills list -C output missing project source:\n%s", out)
+	}
+}
+
+func TestSkillsShowListsCustomResources(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	t.Setenv("HOME", home)
+
+	skillDir := filepath.Join(project, ".agents", "skills", "resource-skill")
+	writeSkillFile(t, skillDir, `---
+name: resource-skill
+description: Skill with bundled resources.
+---
+
+# Resource Skill
+`)
+	if err := os.MkdirAll(filepath.Join(skillDir, "scripts"), 0o755); err != nil {
+		t.Fatalf("mkdir scripts: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "scripts", "run.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	cmd := exec.Command("go", "run", ".", "skills", "show", "resource-skill", "-C", project)
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("oa skills show -C should succeed, got err=%v output=%s", err, out)
+	}
+
+	text := string(out)
+	if !strings.Contains(text, "<file>scripts/run.sh</file>") {
+		t.Fatalf("oa skills show output missing bundled resource:\n%s", out)
+	}
+	if !strings.Contains(text, "Skill directory: "+skillDir) {
+		t.Fatalf("oa skills show output missing absolute directory:\n%s", out)
+	}
+}
+
 func TestListHonorsExplicitConfigPath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -124,6 +252,16 @@ func TestListHonorsExplicitConfigPath(t *testing.T) {
 	}
 	if strings.Contains(string(out), "claude") {
 		t.Fatalf("oa list -c should not merge embedded defaults:\n%s", out)
+	}
+}
+
+func writeSkillFile(t *testing.T, dir, content string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write skill %s: %v", dir, err)
 	}
 }
 

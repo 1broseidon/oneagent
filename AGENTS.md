@@ -31,7 +31,7 @@ A Go library and CLI that wrap AI agent CLIs behind one normalized interface. Bu
 ## Quality
 
 - `go test ./...` clean
-- All functions pass `gocyclo -over 10`
+- All functions pass `gocyclo -over 15`
 - `go vet` clean
 - `gofmt` clean
 

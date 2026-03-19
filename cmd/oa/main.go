@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/1broseidon/oneagent"
@@ -22,6 +24,7 @@ type cliOpts struct {
 	configPath string
 	preRun     string
 	postRun    string
+	skills     string
 	prompt     []string
 }
 
@@ -49,6 +52,14 @@ func parseArgs(args []string) cliOpts {
 		case "--text":
 			o.text = true
 			continue
+		case "--skills":
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				o.skills = args[i+1]
+				i++
+			} else {
+				o.skills = "catalog"
+			}
+			continue
 		}
 		if args[i] == "--stream" {
 			o.stream = true
@@ -66,33 +77,61 @@ func parseArgs(args []string) cliOpts {
 
 func main() {
 	args := os.Args[1:]
+	if handleTopLevelCommand(args) {
+		return
+	}
 
-	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
+	runPrompt(parseArgs(args))
+}
+
+func handleTopLevelCommand(args []string) bool {
+	if len(args) == 0 || isHelpCommand(args[0]) {
 		usage()
-		return
+		return true
 	}
-	if args[0] == "-v" || args[0] == "--version" || args[0] == "version" {
+	if isVersionCommand(args[0]) {
 		fmt.Printf("oa %s\n", buildVersion())
-		return
+		return true
+	}
+	if handleBackendListCommand(args) {
+		return true
+	}
+	return handleNamedCommand(args)
+}
+
+func isHelpCommand(arg string) bool {
+	return arg == "-h" || arg == "--help" || arg == "help"
+}
+
+func isVersionCommand(arg string) bool {
+	return arg == "-v" || arg == "--version" || arg == "version"
+}
+
+func handleBackendListCommand(args []string) bool {
+	if args[0] != "list" && args[0] != "backends" {
+		return false
 	}
 
-	if args[0] == "list" || args[0] == "backends" {
-		args, configPath := parseConfigArgs(args[1:], "")
-		if len(args) != 0 {
-			fmt.Fprintln(os.Stderr, "usage: oa list [-c config]")
-			os.Exit(1)
-		}
-		listBackends(configPath)
-		return
+	args, configPath := parseConfigArgs(args[1:], "")
+	if len(args) != 0 {
+		fmt.Fprintln(os.Stderr, "usage: oa list [-c config]")
+		os.Exit(1)
 	}
+	listBackends(configPath)
+	return true
+}
 
-	if args[0] == "thread" {
+func handleNamedCommand(args []string) bool {
+	switch args[0] {
+	case "thread":
 		threadCmd(args[1:], "")
-		return
+		return true
+	case "skills":
+		skillsCmd(args[1:])
+		return true
+	default:
+		return false
 	}
-
-	o := parseArgs(args)
-	runPrompt(o)
 }
 
 func runPrompt(o cliOpts) {
@@ -175,6 +214,7 @@ func loadRunContext(o cliOpts) (map[string]oneagent.Backend, oneagent.RunOpts) {
 		ThreadID:   o.thread,
 		PreRunCmd:  o.preRun,
 		PostRunCmd: o.postRun,
+		Skills:     o.skills,
 	}
 	return backends, opts
 }
@@ -309,6 +349,32 @@ func threadCmd(args []string, configPath string) {
 	}
 }
 
+func skillsCmd(args []string) {
+	args, cwd := parseCWDArgs(args, "")
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: oa skills <list|show> [args]")
+		os.Exit(1)
+	}
+
+	switch args[0] {
+	case "list":
+		if len(args) != 1 {
+			fmt.Fprintln(os.Stderr, "usage: oa skills list [-C dir]")
+			os.Exit(1)
+		}
+		listSkills(cwd)
+	case "show":
+		if len(args) != 2 {
+			fmt.Fprintln(os.Stderr, "usage: oa skills show <name> [-C dir]")
+			os.Exit(1)
+		}
+		showSkill(cwd, args[1])
+	default:
+		fmt.Fprintf(os.Stderr, "unknown skills command: %s\n", args[0])
+		os.Exit(1)
+	}
+}
+
 func parseConfigArgs(args []string, configPath string) ([]string, string) {
 	out := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
@@ -324,6 +390,23 @@ func parseConfigArgs(args []string, configPath string) ([]string, string) {
 		out = append(out, args[i])
 	}
 	return out, configPath
+}
+
+func parseCWDArgs(args []string, cwd string) ([]string, string) {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-C" || args[i] == "--cwd" {
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "error: missing value for --cwd")
+				os.Exit(1)
+			}
+			cwd = args[i+1]
+			i++
+			continue
+		}
+		out = append(out, args[i])
+	}
+	return out, cwd
 }
 
 func threadCompact(args []string, configPath string) {
@@ -381,6 +464,64 @@ func listBackends(configPath string) {
 	}
 }
 
+func listSkills(cwd string) {
+	skills := loadSkills(cwd)
+	names := make([]string, 0, len(skills))
+	for name := range skills {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		skill := skills[name]
+		fmt.Printf("%-12s %-40s (%s)\n", skill.Name, truncate(skill.Description, 40), skill.Source)
+	}
+}
+
+func loadSkills(cwd string) map[string]oneagent.Skill {
+	skills, err := oneagent.LoadSkills(cwd)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	return skills
+}
+
+func showSkill(cwd, name string) {
+	skills := loadSkills(cwd)
+	skill, ok := skills[name]
+	if !ok {
+		fmt.Fprintf(os.Stderr, "skill not found: %s\n", name)
+		os.Exit(1)
+	}
+
+	resources, err := oneagent.ListSkillResources(skill)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("<skill_content name=\"%s\">\n", html.EscapeString(skill.Name))
+	if skill.Body != "" {
+		fmt.Println(skill.Body)
+		fmt.Println()
+	}
+	fmt.Printf("Skill directory: %s\n", html.EscapeString(skill.Directory))
+	fmt.Println("<skill_resources>")
+	for _, resource := range resources {
+		fmt.Printf("  <file>%s</file>\n", html.EscapeString(resource))
+	}
+	fmt.Println("</skill_resources>")
+	fmt.Println("</skill_content>")
+}
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return strings.TrimSpace(s[:max-3]) + "..."
+}
+
 func usage() {
 	fmt.Println(`oa - one agent, any backend
 
@@ -388,6 +529,8 @@ Usage:
   oa [flags] <prompt>
   oa version                     Show binary version
   oa list                        List configured backends
+  oa skills list                 List available skills
+  oa skills show <name>          Show full skill instructions
   oa thread list                 List threads
   oa thread show <id>            Show thread contents
   oa thread compact <id> [-b]    Summarize old turns
@@ -402,6 +545,7 @@ Flags:
   --pre-run <cmd>                Run a shell command before backend execution; exit non-zero aborts
   --post-run <cmd>               Run a shell command after backend execution; result piped to stdin
   -s, --session <id>             Resume session (mutually exclusive with -t)
+  --skills [names]               Inject skills: bare=catalog, names=inline bodies (comma-separated)
   --text                         Emit plain text output (default)
   --stream                       Stream live output while running
   -t, --thread <id>              Start or continue a thread
