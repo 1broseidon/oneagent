@@ -158,30 +158,6 @@ For complex dispatch patterns, use the bundled scripts:
 
 Both scripts use threads, pipes, and hooks — the same primitives available for any custom workflow.
 
-## Passing skills to dispatched agents
-
-By default, no skills are injected — dispatched agents get zero skill overhead. Only pass skills when the task genuinely needs them.
-
-Before dispatching, consider: does this task need specialized instructions the agent wouldn't already know? If it's a simple edit or test run, skip `--skills` entirely.
-
-When skills are needed, be selective — pass only the specific skills the task requires:
-
-```bash
-# The agent needs to know how to delegate sub-tasks
-cat <<'EOF' | oa -b claude --skills dispatch --jsonl
-Break this refactor into smaller tasks and dispatch each to codex.
-EOF
-
-# The agent needs two specific skills
-cat <<'EOF' | oa -b codex --skills dispatch,docx --jsonl
-Generate the report document, then dispatch the review to claude.
-EOF
-```
-
-Avoid `--skills` (bare catalog mode) unless the agent truly needs to discover skills on its own. The catalog adds ~50-100 tokens per installed skill. For most dispatched tasks, you already know which skills apply — pass them by name instead.
-
-Run `oa skills list` to see what's available before choosing which to pass.
-
 ## Gotchas
 
 - The dispatched agent runs in your working directory but has no access to your conversation history. Every prompt must be self-contained.
