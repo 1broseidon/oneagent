@@ -28,7 +28,6 @@ type backendConfig struct {
 	PromptStdin  bool     `json:"prompt_stdin,omitempty"`
 	PreRun       string   `json:"pre_run,omitempty"`
 	PostRun      string   `json:"post_run,omitempty"`
-	Skills       string   `json:"skills,omitempty"`
 }
 
 // compileBackend converts a backendConfig into the canonical Backend struct.
@@ -52,7 +51,6 @@ func compileBackend(c backendConfig) (Backend, error) {
 		PromptStdin:  c.PromptStdin,
 		PreRunCmd:    c.PreRun,
 		PostRunCmd:   c.PostRun,
-		Skills:       c.Skills,
 	}
 
 	if err := compileCommands(&b, c); err != nil {

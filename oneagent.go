@@ -43,7 +43,6 @@ type Backend struct {
 	PromptStdin  bool     // pass prompt via stdin instead of argv
 	PreRunCmd    string   // shell command to run before backend execution
 	PostRunCmd   string   // shell command to run after backend execution
-	Skills       string   // skill injection mode: "" (none), "catalog", or "name1,name2"
 }
 
 // Response is the normalized output from any backend.
@@ -75,9 +74,8 @@ type HookContext struct {
 
 // Client is an embeddable oneagent runtime with configurable backends and thread store.
 type Client struct {
-	Backends  map[string]Backend
-	Store     Store
-	SkillDirs []string // optional custom skill directories; replaces default user-level scan paths when set
+	Backends map[string]Backend
+	Store    Store
 }
 
 // RunOpts configures a single agent invocation.
@@ -93,7 +91,6 @@ type RunOpts struct {
 	PostRun    func(*HookContext)   // library callback: called after response, for side effects
 	PreRunCmd  string               // CLI shell command to run before backend execution
 	PostRunCmd string               // CLI shell command to run after backend execution
-	Skills     string               // skill injection override: "" uses backend default, "catalog", "none", or "name1,name2"
 }
 
 // ConfigDir returns the default config directory (~/.config/oneagent).
@@ -158,12 +155,9 @@ func mergeBackendsFile(backends map[string]Backend, path string) error {
 }
 
 // Run executes a prompt against the specified backend and returns a normalized response.
-func buildCmd(b Backend, opts RunOpts, skillDirs []string) (*exec.Cmd, error) {
+func buildCmd(b Backend, opts RunOpts) (*exec.Cmd, error) {
 	model := resolvedModel(b, opts)
-	prompt, err := buildPrompt(b, opts, skillDirs)
-	if err != nil {
-		return nil, err
-	}
+	prompt := buildPrompt(b, opts)
 	args, tmpl, err := buildCommandArgs(b, opts, prompt, model)
 	if err != nil {
 		return nil, err
@@ -181,67 +175,11 @@ func resolvedModel(b Backend, opts RunOpts) string {
 	return b.DefaultModel
 }
 
-func buildPrompt(b Backend, opts RunOpts, skillDirs []string) (string, error) {
-	if opts.SessionID != "" {
-		return opts.Prompt, nil
+func buildPrompt(b Backend, opts RunOpts) string {
+	if opts.SessionID != "" || b.SystemPrompt == "" {
+		return opts.Prompt
 	}
-
-	skillMode := resolveSkillMode(b, opts)
-	systemPrompt, err := injectSkills(b.SystemPrompt, opts.CWD, skillDirs, skillMode)
-	if err != nil {
-		return "", err
-	}
-	if systemPrompt == "" {
-		return opts.Prompt, nil
-	}
-	return systemPrompt + "\n\n" + opts.Prompt, nil
-}
-
-func resolveSkillMode(b Backend, opts RunOpts) string {
-	if opts.Skills != "" {
-		return opts.Skills
-	}
-	return b.Skills
-}
-
-func injectSkills(systemPrompt, cwd string, skillDirs []string, mode string) (string, error) {
-	if mode == "" || mode == "none" {
-		return systemPrompt, nil
-	}
-
-	skills, err := LoadSkills(cwd, skillDirs...)
-	if err != nil {
-		return "", err
-	}
-	if len(skills) == 0 {
-		return systemPrompt, nil
-	}
-
-	var injection string
-	if mode == "catalog" {
-		injection = BuildSkillCatalog(skills)
-	} else {
-		injection = buildSkillInline(skills, mode)
-	}
-
-	if injection == "" {
-		return systemPrompt, nil
-	}
-	if systemPrompt == "" {
-		return injection, nil
-	}
-	return injection + "\n\n" + systemPrompt, nil
-}
-
-func buildSkillInline(skills map[string]Skill, names string) string {
-	var parts []string
-	for _, name := range strings.Split(names, ",") {
-		name = strings.TrimSpace(name)
-		if skill, ok := skills[name]; ok && skill.Body != "" {
-			parts = append(parts, skill.Body)
-		}
-	}
-	return strings.Join(parts, "\n\n")
+	return b.SystemPrompt + "\n\n" + opts.Prompt
 }
 
 func buildCommandArgs(b Backend, opts RunOpts, prompt, model string) ([]string, []string, error) {
@@ -518,7 +456,7 @@ func (c Client) run(opts RunOpts, emit func(StreamEvent)) Response {
 		return Response{Error: "backend not configured: " + opts.Backend, Backend: opts.Backend}
 	}
 
-	cmd, err := buildCmd(b, opts, c.SkillDirs)
+	cmd, err := buildCmd(b, opts)
 	if err != nil {
 		return Response{Error: err.Error(), Backend: opts.Backend}
 	}

@@ -2,24 +2,16 @@
 
 All notable changes to oneagent are documented here.
 
-## [0.12.0] - 2026-03-19
+## [0.11.3] - 2026-03-19
 
 ### Added
 
-- Skill system with embedded and custom skill support following agentskills.io spec.
-- `oa skills list` — discover available skills (embedded + custom).
-- `oa skills show <name>` — load skill instructions with structured wrapping.
-- `--skills` flag for opt-in skill injection: bare for catalog, named for inline bodies.
-- `skills` config field per backend for default skill injection mode.
-- Multi-scope custom skill scanning: project-level (`.oneagent/skills/`, `.agents/skills/`) and user-level (`~/.config/oneagent/skills/`, `~/.agents/skills/`).
-- `Client.SkillDirs` for library consumers to override default scan paths.
-- Embedded dispatch skill teaching agents how to use `oa` for delegation.
-- golangci-lint config and pre-commit hook.
+- golangci-lint config (`.golangci.yml`) and pre-commit hook.
 
 ### Changed
 
-- Skill catalog injection is now opt-in (no tokens wasted on simple tasks).
 - Cyclomatic complexity threshold relaxed from 10 to 15.
+- `buildCmd` refactored into smaller helpers for readability.
 
 ### Fixed
 

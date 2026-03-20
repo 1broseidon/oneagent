@@ -284,7 +284,7 @@ func TestDefaultModelUsed(t *testing.T) {
 	// No model override — but {model} isn't in the cmd template above, so we
 	// test via buildCmd directly.
 	b := backends["m"]
-	cmd, err := buildCmd(b, RunOpts{Backend: "m", Prompt: "hi"}, nil)
+	cmd, err := buildCmd(b, RunOpts{Backend: "m", Prompt: "hi"})
 	if err != nil {
 		t.Fatalf("buildCmd returned error: %v", err)
 	}
@@ -312,77 +312,34 @@ func TestEmptyVariableDropsPrecedingFlag(t *testing.T) {
 }
 
 func TestSystemPromptPrependedOnFirstMessage(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-
 	b := Backend{
 		Cmd:          []string{"agent", "--prompt", "{prompt}"},
 		SystemPrompt: "SYSPROMPT",
-		Skills:       "catalog",
 	}
-	cmd, err := buildCmd(b, RunOpts{Backend: "sp", Prompt: "hello"}, nil)
+	cmd, err := buildCmd(b, RunOpts{Backend: "sp", Prompt: "hello"})
 	if err != nil {
 		t.Fatalf("buildCmd returned error: %v", err)
 	}
-	prompt := strings.Join(cmd.Args, "\n")
-	if !strings.Contains(prompt, "Available skills:") {
-		t.Fatalf("skill catalog missing from first prompt, args = %v", cmd.Args)
-	}
-	if !strings.Contains(prompt, "- dispatch:") || !strings.Contains(prompt, "- mcp-tools:") {
-		t.Fatalf("built-in skills missing from prompt catalog, args = %v", cmd.Args)
-	}
-	if !strings.Contains(prompt, "SYSPROMPT\n\nhello") {
-		t.Fatalf("system prompt not appended after catalog, args = %v", cmd.Args)
+	got := strings.Join(cmd.Args, "\n")
+	if !strings.Contains(got, "SYSPROMPT\n\nhello") {
+		t.Fatalf("system prompt not prepended, args = %v", cmd.Args)
 	}
 }
 
 func TestSystemPromptSkippedOnResume(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-
 	b := Backend{
 		Cmd:          []string{"agent", "--prompt", "{prompt}"},
 		ResumeCmd:    []string{"agent", "--session", "{session}", "--prompt", "{prompt}"},
 		SystemPrompt: "SYSPROMPT",
 	}
-	cmd, err := buildCmd(b, RunOpts{Backend: "sp", Prompt: "hello", SessionID: "s1"}, nil)
+	cmd, err := buildCmd(b, RunOpts{Backend: "sp", Prompt: "hello", SessionID: "s1"})
 	if err != nil {
 		t.Fatalf("buildCmd returned error: %v", err)
 	}
 	for _, a := range cmd.Args {
-		if a == "SYSPROMPT\n\nhello" || strings.Contains(a, "Available skills:") {
-			t.Fatal("system prompt and skill catalog should be skipped on resume")
+		if strings.Contains(a, "SYSPROMPT") {
+			t.Fatal("system prompt should be skipped on resume")
 		}
-	}
-}
-
-func TestSystemPromptCatalogIncludesCustomSkills(t *testing.T) {
-	home := t.TempDir()
-	project := t.TempDir()
-	t.Setenv("HOME", home)
-
-	if err := os.MkdirAll(filepath.Join(project, ".agents", "skills", "custom-skill"), 0o755); err != nil {
-		t.Fatalf("mkdir custom skill: %v", err)
-	}
-	content := `---
-name: custom-skill
-description: Project-specific helper.
----
-
-# Custom Skill
-`
-	if err := os.WriteFile(filepath.Join(project, ".agents", "skills", "custom-skill", "SKILL.md"), []byte(content), 0o644); err != nil {
-		t.Fatalf("write custom skill: %v", err)
-	}
-
-	b := Backend{
-		Cmd:    []string{"agent", "--prompt", "{prompt}"},
-		Skills: "catalog",
-	}
-	cmd, err := buildCmd(b, RunOpts{Backend: "sp", Prompt: "hello", CWD: project}, nil)
-	if err != nil {
-		t.Fatalf("buildCmd returned error: %v", err)
-	}
-	if !strings.Contains(strings.Join(cmd.Args, "\n"), "- custom-skill: Project-specific helper.") {
-		t.Fatalf("custom skill missing from prompt catalog, args = %v", cmd.Args)
 	}
 }
 
@@ -391,7 +348,7 @@ func TestResumeCmdSelectedWithSession(t *testing.T) {
 		Cmd:       []string{"agent", "--prompt", "{prompt}"},
 		ResumeCmd: []string{"agent", "--resume", "{session}", "--prompt", "{prompt}"},
 	}
-	cmd, err := buildCmd(b, RunOpts{Backend: "r", Prompt: "hi", SessionID: "s99"}, nil)
+	cmd, err := buildCmd(b, RunOpts{Backend: "r", Prompt: "hi", SessionID: "s99"})
 	if err != nil {
 		t.Fatalf("buildCmd returned error: %v", err)
 	}
@@ -412,7 +369,7 @@ func TestCWDOnResume(t *testing.T) {
 			Cmd:       []string{"agent", "-C", "{cwd}", "--prompt", "{prompt}"},
 			ResumeCmd: []string{"agent", "--resume", "{session}", "--prompt", "{prompt}"},
 		}
-		cmd, err := buildCmd(b, RunOpts{Backend: "r", Prompt: "hi", SessionID: "s99", CWD: "/tmp/test"}, nil)
+		cmd, err := buildCmd(b, RunOpts{Backend: "r", Prompt: "hi", SessionID: "s99", CWD: "/tmp/test"})
 		if err != nil {
 			t.Fatalf("buildCmd returned error: %v", err)
 		}
@@ -426,7 +383,7 @@ func TestCWDOnResume(t *testing.T) {
 			Cmd:       []string{"agent", "--prompt", "{prompt}"},
 			ResumeCmd: []string{"agent", "--resume", "{session}", "-C", "{cwd}", "--prompt", "{prompt}"},
 		}
-		cmd, err := buildCmd(b, RunOpts{Backend: "r", Prompt: "hi", SessionID: "s99", CWD: "/tmp/test"}, nil)
+		cmd, err := buildCmd(b, RunOpts{Backend: "r", Prompt: "hi", SessionID: "s99", CWD: "/tmp/test"})
 		if err != nil {
 			t.Fatalf("buildCmd returned error: %v", err)
 		}
@@ -438,7 +395,7 @@ func TestCWDOnResume(t *testing.T) {
 
 func TestCwdSetWhenNotInTemplate(t *testing.T) {
 	b := Backend{Cmd: []string{"sh", "-c", "echo ok"}}
-	cmd, err := buildCmd(b, RunOpts{Backend: "c", Prompt: "hi", CWD: "/tmp/test"}, nil)
+	cmd, err := buildCmd(b, RunOpts{Backend: "c", Prompt: "hi", CWD: "/tmp/test"})
 	if err != nil {
 		t.Fatalf("buildCmd returned error: %v", err)
 	}
@@ -449,7 +406,7 @@ func TestCwdSetWhenNotInTemplate(t *testing.T) {
 
 func TestCwdNotSetWhenInTemplate(t *testing.T) {
 	b := Backend{Cmd: []string{"agent", "-C", "{cwd}", "--prompt", "{prompt}"}}
-	cmd, err := buildCmd(b, RunOpts{Backend: "c", Prompt: "hi", CWD: "/tmp/test"}, nil)
+	cmd, err := buildCmd(b, RunOpts{Backend: "c", Prompt: "hi", CWD: "/tmp/test"})
 	if err != nil {
 		t.Fatalf("buildCmd returned error: %v", err)
 	}
@@ -460,7 +417,7 @@ func TestCwdNotSetWhenInTemplate(t *testing.T) {
 
 func TestBuildCmdReturnsErrorWhenSubstitutionRemovesExecutable(t *testing.T) {
 	b := Backend{Cmd: []string{"{cwd}"}}
-	_, err := buildCmd(b, RunOpts{Backend: "broken", Prompt: "hi"}, nil)
+	_, err := buildCmd(b, RunOpts{Backend: "broken", Prompt: "hi"})
 	if err == nil {
 		t.Fatal("buildCmd should fail when command becomes empty")
 	}
