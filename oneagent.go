@@ -104,6 +104,15 @@ func DefaultConfigPath() string {
 	return filepath.Join(ConfigDir(), "backends.json")
 }
 
+// LoadOptions controls how backend configs are loaded.
+type LoadOptions struct {
+	// IncludeEmbedded loads the embedded default backends first.
+	IncludeEmbedded bool
+	// OverridePath is merged on top when IncludeEmbedded is true,
+	// or loaded directly when IncludeEmbedded is false.
+	OverridePath string
+}
+
 //go:embed defaults/backends.json
 var embeddedBackends []byte
 
@@ -115,6 +124,29 @@ func LoadBackends(path string) (map[string]Backend, error) {
 		return loadDefaultBackends()
 	}
 	return loadBackendsFile(path)
+}
+
+// LoadBackendsWithOptions loads backends using explicit options.
+// This is useful for consumers that want the embedded defaults but
+// need to own the override path instead of using ~/.config/oneagent/backends.json.
+func LoadBackendsWithOptions(opts LoadOptions) (map[string]Backend, error) {
+	if !opts.IncludeEmbedded {
+		if opts.OverridePath == "" {
+			return nil, fmt.Errorf("override path required when IncludeEmbedded is false")
+		}
+		return loadBackendsFile(opts.OverridePath)
+	}
+
+	backends, err := loadConfigBackends(embeddedBackends)
+	if err != nil {
+		return nil, fmt.Errorf("invalid embedded backends: %w", err)
+	}
+	if opts.OverridePath != "" {
+		if err := mergeBackendsFile(backends, opts.OverridePath); err != nil {
+			return nil, err
+		}
+	}
+	return backends, nil
 }
 
 func loadBackendsFile(path string) (map[string]Backend, error) {

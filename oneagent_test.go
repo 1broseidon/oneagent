@@ -179,6 +179,50 @@ func TestRunStreamUsesDeltaSelectorsWhenConfigured(t *testing.T) {
 	}
 }
 
+func TestRunStreamCanUseFinalAssistantMessageForResult(t *testing.T) {
+	events := `{"type":"session","sid":"sess-42"}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"Let me look first."}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_end","toolCall":{"name":"read","arguments":{"path":"README.md"}}}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Let me look first."},{"type":"toolCall","name":"read","arguments":{"path":"README.md"}}],"stopReason":"toolUse"}}
+{"type":"tool_execution_end","toolCallId":"tool-1","toolName":"read","result":{"content":[{"type":"text","text":"ok"}]}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"All clean."}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"All clean."}],"stopReason":"stop"}}
+`
+	b := Backend{
+		Cmd:          []string{"sh", "-c", "printf '" + events + "'"},
+		Format:       "jsonl",
+		Activity:     "{assistantMessageEvent.toolCall.name} {assistantMessageEvent.toolCall.arguments.path}",
+		ActivityWhen: "type=message_update&assistantMessageEvent.type=toolcall_end",
+		Delta:        "assistantMessageEvent.delta",
+		DeltaWhen:    "type=message_update&assistantMessageEvent.type=text_delta",
+		Result:       "message.content.0.text",
+		ResultWhen:   "type=message_end&message.role=assistant&message.content.0.type=text&message.stopReason=stop",
+		Session:      "sid",
+		SessionWhen:  "type=session",
+	}
+	backends := map[string]Backend{"jl": b}
+
+	var got []StreamEvent
+	resp := RunStream(backends, RunOpts{Backend: "jl", Prompt: "hi"}, func(event StreamEvent) {
+		got = append(got, event)
+	})
+
+	if resp.Result != "All clean." {
+		t.Fatalf("result = %q, want %q", resp.Result, "All clean.")
+	}
+
+	want := []StreamEvent{
+		{Type: "session", Backend: "jl", Session: "sess-42"},
+		{Type: "delta", Backend: "jl", Session: "sess-42", Delta: "Let me look first."},
+		{Type: "activity", Backend: "jl", Session: "sess-42", Activity: "read README.md"},
+		{Type: "delta", Backend: "jl", Session: "sess-42", Delta: "All clean."},
+		{Type: "done", Backend: "jl", Session: "sess-42", Result: "All clean."},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("events = %+v, want %+v", got, want)
+	}
+}
+
 func TestJSONGetSupportsArrayIndexes(t *testing.T) {
 	line := map[string]any{
 		"message": map[string]any{
@@ -554,6 +598,63 @@ func TestLoadBackendsExplicitPathBypassesEmbeddedDefaults(t *testing.T) {
 	}
 	if _, ok := backends["only"]; !ok {
 		t.Fatalf("explicit backend missing from %v", mapsKeys(backends))
+	}
+}
+
+func TestLoadBackendsWithOptionsUsesCustomOverridePath(t *testing.T) {
+	setupThreadHome(t)
+
+	if err := os.MkdirAll(ConfigDir(), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+
+	defaultOverride := `{
+		"claude": {
+			"run": "user-claude {prompt}",
+			"format": "json",
+			"result": "result",
+			"session": "session"
+		}
+	}`
+	if err := os.WriteFile(DefaultConfigPath(), []byte(defaultOverride), 0o644); err != nil {
+		t.Fatalf("write default override config: %v", err)
+	}
+
+	customPath := filepath.Join(t.TempDir(), "moxie-backends.json")
+	customOverride := `{
+		"pi": {
+			"run": "pi-custom {prompt}",
+			"format": "json",
+			"result": "result",
+			"session": "session"
+		},
+		"custom": {
+			"run": "custom-agent {prompt}",
+			"format": "json",
+			"result": "result",
+			"session": "session"
+		}
+	}`
+	if err := os.WriteFile(customPath, []byte(customOverride), 0o644); err != nil {
+		t.Fatalf("write custom override config: %v", err)
+	}
+
+	backends, err := LoadBackendsWithOptions(LoadOptions{
+		IncludeEmbedded: true,
+		OverridePath:    customPath,
+	})
+	if err != nil {
+		t.Fatalf("LoadBackendsWithOptions: %v", err)
+	}
+
+	if got := backends["claude"].Cmd[0]; got == "user-claude" {
+		t.Fatalf("default ~/.config/oneagent override should not apply, got %q", got)
+	}
+	if got := backends["pi"].Cmd[0]; got != "pi-custom" {
+		t.Fatalf("custom override not applied, pi cmd[0] = %q", got)
+	}
+	if _, ok := backends["custom"]; !ok {
+		t.Fatalf("custom backend missing from %v", mapsKeys(backends))
 	}
 }
 

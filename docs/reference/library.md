@@ -30,6 +30,18 @@ if err != nil {
 }
 ```
 
+Or merge the embedded defaults with an app-owned override path:
+
+```go
+backends, err := oneagent.LoadBackendsWithOptions(oneagent.LoadOptions{
+	IncludeEmbedded: true,
+	OverridePath:    "/path/to/app/backends.json",
+})
+if err != nil {
+	log.Fatal(err)
+}
+```
+
 ## Running a Prompt
 
 For a single final response:

@@ -2,6 +2,16 @@
 
 All notable changes to oneagent are documented here.
 
+## [0.11.5] - 2026-03-20
+
+### Added
+
+- `LoadBackendsWithOptions` and `LoadOptions` for consumers that want embedded defaults plus an app-owned override path instead of `~/.config/oneagent/backends.json`.
+
+### Fixed
+
+- Pi backend result selection now uses the final assistant message while keeping `text_delta` streaming separate, preventing intermediate narration from being folded into the final result.
+
 ## [0.11.4] - 2026-03-20
 
 ### Added
