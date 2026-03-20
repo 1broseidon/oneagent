@@ -20,6 +20,7 @@ type cliOpts struct {
 	stream     bool
 	thread     string
 	configPath string
+	thinking   string
 	preRun     string
 	postRun    string
 	prompt     []string
@@ -34,6 +35,7 @@ func parseArgs(args []string) cliOpts {
 		"-s": &o.session, "--session": &o.session,
 		"-t": &o.thread, "--thread": &o.thread,
 		"-c": &o.configPath, "--config": &o.configPath,
+		"--thinking": &o.thinking,
 		"--pre-run":  &o.preRun,
 		"--post-run": &o.postRun,
 	}
@@ -195,6 +197,7 @@ func loadRunContext(o cliOpts) (map[string]oneagent.Backend, oneagent.RunOpts) {
 		Backend:    backend,
 		Prompt:     strings.Join(o.prompt, " "),
 		Model:      o.model,
+		Thinking:   o.thinking,
 		CWD:        o.cwd,
 		SessionID:  o.session,
 		ThreadID:   o.thread,
@@ -420,6 +423,7 @@ Usage:
 Flags:
   -b, --backend <name>           Backend to use (default: claude)
   -m, --model <model>            Model override
+  --thinking <level>             Thinking/reasoning effort (e.g. low, medium, high)
   -C, --cwd <dir>                Working directory
   -v, --version                  Show binary version
   --json                         Emit machine-readable JSON output

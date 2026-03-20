@@ -1,6 +1,6 @@
 {
   "claude": {
-    "run": "claude -p {prompt} --model {model} --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions",
+    "run": "claude -p {prompt} --model {model} --effort {thinking} --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions",
     "resume": "+ --resume {session}",
     "format": "jsonl",
     "prompt_stdin": true,
@@ -18,7 +18,7 @@
     "paths": ["~/.claude/local", "~/.local/bin", "~/.npm-global/bin"]
   },
   "codex": {
-    "run": "codex exec - --json --dangerously-bypass-approvals-and-sandbox -C {cwd} --skip-git-repo-check",
+    "run": "codex exec - --json --dangerously-bypass-approvals-and-sandbox -C {cwd} --skip-git-repo-check -c model_reasoning_effort={thinking}",
     "resume": "codex exec resume {session} - --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check",
     "format": "jsonl",
     "prompt_stdin": true,
@@ -50,7 +50,7 @@
     "paths": ["~/.opencode/bin", "~/.local/bin"]
   },
   "pi": {
-    "run": "pi -p {prompt} --mode json --model {model}",
+    "run": "pi -p {prompt} --mode json --model {model} --thinking {thinking}",
     "resume": "+ --session {session}",
     "format": "jsonl",
     "prompt_stdin": true,

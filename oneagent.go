@@ -86,6 +86,7 @@ type RunOpts struct {
 	Backend    string
 	Prompt     string
 	Model      string
+	Thinking   string // thinking/reasoning effort level (e.g. "low", "medium", "high")
 	CWD        string
 	SessionID  string
 	ThreadID   string
@@ -242,10 +243,11 @@ func buildPrompt(b Backend, opts RunOpts) string {
 func buildCommandArgs(b Backend, opts RunOpts, prompt, model string) ([]string, []string, error) {
 	tmpl := selectCommandTemplate(b, opts)
 	args := substArgs(tmpl, map[string]string{
-		"prompt":  promptArg(prompt, b.PromptStdin),
-		"model":   model,
-		"cwd":     opts.CWD,
-		"session": opts.SessionID,
+		"prompt":   promptArg(prompt, b.PromptStdin),
+		"model":    model,
+		"thinking": opts.Thinking,
+		"cwd":      opts.CWD,
+		"session":  opts.SessionID,
 	})
 	if len(args) == 0 {
 		return nil, nil, fmt.Errorf("backend %q produced an empty command", opts.Backend)

@@ -2,6 +2,14 @@
 
 All notable changes to oneagent are documented here.
 
+## [0.11.8] - 2026-03-20
+
+### Added
+
+- `Thinking` field on `RunOpts` and `--thinking <level>` CLI flag for controlling thinking/reasoning effort per invocation.
+- `{thinking}` template variable in backend configs — drops silently when unset.
+- Thinking support in Claude (`--effort`), Codex (`-c model_reasoning_effort=`), and Pi (`--thinking`) embedded configs.
+
 ## [0.11.7] - 2026-03-20
 
 ### Added
