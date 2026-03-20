@@ -53,6 +53,21 @@ func TestJSONNormalization(t *testing.T) {
 	}
 }
 
+func TestJSONPreservesEmptyResult(t *testing.T) {
+	backends := map[string]Backend{"js": fakeJSON("", "sess-1")}
+	resp := Run(backends, RunOpts{Backend: "js", Prompt: "hi"})
+
+	if resp.Result != "" {
+		t.Fatalf("result = %q, want empty", resp.Result)
+	}
+	if resp.Session != "sess-1" {
+		t.Fatalf("session = %q, want %q", resp.Session, "sess-1")
+	}
+	if resp.Error != "" {
+		t.Fatalf("unexpected error: %q", resp.Error)
+	}
+}
+
 func TestJSONLEventExtraction(t *testing.T) {
 	events := `{"type":"delta","data":{"text":"one"}}
 {"type":"delta","data":{"text":"two"}}

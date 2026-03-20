@@ -515,9 +515,6 @@ func (c Client) run(opts RunOpts, emit func(StreamEvent)) Response {
 		return resp
 	}
 
-	if resp.Result == "" {
-		resp.Result = "Done — nothing to report."
-	}
 	return resp
 }
 
