@@ -64,5 +64,23 @@
     "error": "message",
     "error_when": "type=error",
     "paths": ["~/.local/bin", "~/.npm-global/bin"]
+  },
+  "gemini": {
+    "run": "gemini -p {prompt} --model {model} --output-format stream-json --yolo",
+    "format": "jsonl",
+    "prompt_stdin": true,
+    "activity": "{tool_name}",
+    "activity_when": "type=tool_use",
+    "delta": "content",
+    "delta_when": "type=message&role=assistant&delta=true",
+    "result": "content",
+    "result_when": "type=message&role=assistant&delta=true",
+    "result_append": true,
+    "session": "session_id",
+    "session_when": "type=init",
+    "error": "output",
+    "error_when": "type=tool_result&status=error",
+    "model": "auto-gemini-3",
+    "paths": ["/home/linuxbrew/.linuxbrew/bin", "~/.local/bin", "~/.npm-global/bin"]
   }
 }

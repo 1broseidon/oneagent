@@ -2,6 +2,16 @@
 
 All notable changes to oneagent are documented here.
 
+## [0.11.4] - 2026-03-20
+
+### Added
+
+- Embedded Gemini CLI backend with stream-json output parsing.
+
+### Changed
+
+- Removed `--skills` references from `oa-dispatch` skill.
+
 ## [0.11.3] - 2026-03-19
 
 ### Added
