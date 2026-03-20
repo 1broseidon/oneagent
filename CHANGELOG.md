@@ -2,6 +2,12 @@
 
 All notable changes to oneagent are documented here.
 
+## [0.11.6] - 2026-03-20
+
+### Fixed
+
+- Empty successful backend results are now preserved as empty strings instead of being rewritten to `Done — nothing to report.`
+
 ## [0.11.5] - 2026-03-20
 
 ### Added
