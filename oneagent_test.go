@@ -2,6 +2,7 @@ package oneagent
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeJSON returns a backend that emits a static JSON blob.
@@ -258,6 +260,31 @@ func TestJSONGetSupportsArrayIndexes(t *testing.T) {
 	}
 }
 
+func TestJSONGetSupportsNegativeArrayIndexes(t *testing.T) {
+	line := map[string]any{
+		"message": map[string]any{
+			"content": []any{
+				map[string]any{"type": "thinking", "text": "hmm"},
+				map[string]any{"type": "text", "text": "answer"},
+			},
+		},
+	}
+
+	if got := jsonGet(line, "message.content.-1.text"); got != "answer" {
+		t.Fatalf("jsonGet negative index = %v, want answer", got)
+	}
+	if got := jsonGet(line, "message.content.-1.type"); got != "text" {
+		t.Fatalf("jsonGet negative index type = %v, want text", got)
+	}
+	if got := jsonGet(line, "message.content.-2.type"); got != "thinking" {
+		t.Fatalf("jsonGet negative index -2 = %v, want thinking", got)
+	}
+	// out of bounds
+	if got := jsonGet(line, "message.content.-3.type"); got != nil {
+		t.Fatalf("jsonGet negative out of bounds = %v, want nil", got)
+	}
+}
+
 func TestExtractTemplateBuildsActivityMessage(t *testing.T) {
 	line := map[string]any{
 		"type": "assistant",
@@ -319,6 +346,91 @@ func TestBackendErrorSurfaced(t *testing.T) {
 	resp := Run(backends, RunOpts{Backend: "bad", Prompt: "hi"})
 	if resp.Error == "" {
 		t.Fatal("expected error from failing backend")
+	}
+}
+
+func TestRunContextCancelsBackend(t *testing.T) {
+	backends := map[string]Backend{
+		"slow": {
+			Cmd:    []string{"sh", "-c", "sleep 30"},
+			Format: "json",
+			Result: "result",
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, cancel)
+
+	start := time.Now()
+	resp := RunContext(ctx, backends, RunOpts{Backend: "slow", Prompt: "hi"})
+	elapsed := time.Since(start)
+
+	if elapsed > 5*time.Second {
+		t.Fatalf("RunContext took too long after cancel: %v", elapsed)
+	}
+	if resp.Error != context.Canceled.Error() {
+		t.Fatalf("error = %q, want %q", resp.Error, context.Canceled.Error())
+	}
+}
+
+func TestResponseIncludesExitCodeAndStderr(t *testing.T) {
+	t.Run("json", func(t *testing.T) {
+		backends := map[string]Backend{
+			"bad": {
+				Cmd:    []string{"sh", "-c", "printf 'json boom\\n' >&2; exit 7"},
+				Format: "json",
+				Result: "result",
+			},
+		}
+
+		resp := Run(backends, RunOpts{Backend: "bad", Prompt: "hi"})
+
+		if resp.ExitCode != 7 {
+			t.Fatalf("exit code = %d, want 7", resp.ExitCode)
+		}
+		if resp.Stderr != "json boom\n" {
+			t.Fatalf("stderr = %q, want %q", resp.Stderr, "json boom\n")
+		}
+	})
+
+	t.Run("jsonl", func(t *testing.T) {
+		backends := map[string]Backend{
+			"bad": {
+				Cmd:        []string{"sh", "-c", "printf '{\"type\":\"delta\",\"data\":{\"text\":\"partial\"}}\\n'; printf 'jsonl boom\\n' >&2; exit 9"},
+				Format:     "jsonl",
+				Result:     "data.text",
+				ResultWhen: "type=delta",
+			},
+		}
+
+		resp := Run(backends, RunOpts{Backend: "bad", Prompt: "hi"})
+
+		if resp.ExitCode != 9 {
+			t.Fatalf("exit code = %d, want 9", resp.ExitCode)
+		}
+		if resp.Stderr != "jsonl boom\n" {
+			t.Fatalf("stderr = %q, want %q", resp.Stderr, "jsonl boom\n")
+		}
+	})
+}
+
+func TestRunBackfillsSessionFromResumeOpts(t *testing.T) {
+	backends := map[string]Backend{
+		"jl": {
+			Cmd:         []string{"sh", "-c", "printf '{\"type\":\"done\",\"data\":{\"text\":\"ok\"}}\\n'"},
+			ResumeCmd:   []string{"sh", "-c", "printf '{\"type\":\"done\",\"data\":{\"text\":\"ok\"}}\\n'"},
+			Format:      "jsonl",
+			Result:      "data.text",
+			ResultWhen:  "type=done",
+			Session:     "sid",
+			SessionWhen: "type=session",
+		},
+	}
+
+	resp := Run(backends, RunOpts{Backend: "jl", Prompt: "hi", SessionID: "sess-resume"})
+
+	if resp.Session != "sess-resume" {
+		t.Fatalf("session = %q, want %q", resp.Session, "sess-resume")
 	}
 }
 

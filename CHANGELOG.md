@@ -2,6 +2,19 @@
 
 All notable changes to oneagent are documented here.
 
+## [0.11.7] - 2026-03-20
+
+### Added
+
+- `RunContext` and `RunStreamContext` methods on `Client` and package level for cancellable backend invocations via `context.Context`.
+- `ExitCode` and `Stderr` fields on `Response` for richer error diagnostics.
+- Negative array index support in `jsonGet` (e.g., `content.-1.text` for last element).
+
+### Fixed
+
+- Pi backend empty result when model includes thinking tokens before text content — now uses `turn_end` with `content.-1.text`.
+- Session backfill on resume — `resp.Session` is populated from `opts.SessionID` when no session event arrives from the backend.
+
 ## [0.11.6] - 2026-03-20
 
 ### Fixed

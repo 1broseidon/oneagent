@@ -9,6 +9,7 @@ package oneagent
 
 import (
 	"bufio"
+	"context"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -52,6 +53,8 @@ type Response struct {
 	ThreadID string `json:"thread_id,omitempty"`
 	Backend  string `json:"backend"`
 	Error    string `json:"error,omitempty"`
+	ExitCode int    `json:"exit_code,omitempty"`
+	Stderr   string `json:"stderr,omitempty"`
 }
 
 // StreamEvent is a normalized incremental event emitted during a streaming run.
@@ -115,6 +118,15 @@ type LoadOptions struct {
 
 //go:embed defaults/backends.json
 var embeddedBackends []byte
+
+var (
+	_ = (*Client).invokePrePhase
+	_ = (*Client).runThreaded
+	_ = runPreHook
+	_ = (*Client).run
+	_ = runJSON
+	_ = runJSONL
+)
 
 // LoadBackends loads embedded defaults when path is empty and merges the
 // optional user override file (~/.config/oneagent/backends.json) on top.
@@ -188,6 +200,10 @@ func mergeBackendsFile(backends map[string]Backend, path string) error {
 
 // Run executes a prompt against the specified backend and returns a normalized response.
 func buildCmd(b Backend, opts RunOpts) (*exec.Cmd, error) {
+	return buildCmdContext(context.Background(), b, opts)
+}
+
+func buildCmdContext(ctx context.Context, b Backend, opts RunOpts) (*exec.Cmd, error) {
 	model := resolvedModel(b, opts)
 	prompt := buildPrompt(b, opts)
 	args, tmpl, err := buildCommandArgs(b, opts, prompt, model)
@@ -195,9 +211,18 @@ func buildCmd(b Backend, opts RunOpts) (*exec.Cmd, error) {
 		return nil, err
 	}
 
-	cmd := exec.Command(resolveProgram(args[0], b.Paths), args[1:]...)
+	cmd := commandForContext(ctx, resolveProgram(args[0], b.Paths), args[1:]...)
 	configureCommand(cmd, b, opts, prompt, tmpl)
 	return cmd, nil
+}
+
+func commandForContext(ctx context.Context, name string, args ...string) *exec.Cmd {
+	if ctx == nil {
+		return exec.Command(name, args...)
+	}
+	cmd := exec.CommandContext(ctx, name, args...)
+	applyCancelableCommandContext(cmd, ctx)
+	return cmd
 }
 
 func resolvedModel(b Backend, opts RunOpts) string {
@@ -254,28 +279,48 @@ func configureCommand(cmd *exec.Cmd, b Backend, opts RunOpts, prompt string, tmp
 
 // Run executes a prompt against the specified backend and returns a normalized response.
 func Run(backends map[string]Backend, opts RunOpts) Response {
-	return Client{Backends: backends}.Run(opts)
+	return RunContext(context.Background(), backends, opts)
+}
+
+// RunContext executes a prompt against the specified backend with cancellation support.
+func RunContext(ctx context.Context, backends map[string]Backend, opts RunOpts) Response {
+	return Client{Backends: backends}.RunContext(ctx, opts)
 }
 
 // RunStream executes a prompt and emits normalized streaming events as they arrive.
 func RunStream(backends map[string]Backend, opts RunOpts, emit func(StreamEvent)) Response {
-	return Client{Backends: backends}.RunStream(opts, emit)
+	return RunStreamContext(context.Background(), backends, opts, emit)
+}
+
+// RunStreamContext executes a prompt with cancellation support and emits normalized streaming events.
+func RunStreamContext(ctx context.Context, backends map[string]Backend, opts RunOpts, emit func(StreamEvent)) Response {
+	return Client{Backends: backends}.RunStreamContext(ctx, opts, emit)
 }
 
 // Run executes a prompt against the configured backends and returns a normalized response.
 func (c Client) Run(opts RunOpts) Response {
-	return c.invoke(opts, nil)
+	return c.RunContext(context.Background(), opts)
+}
+
+// RunContext executes a prompt against the configured backends and returns a normalized response.
+func (c Client) RunContext(ctx context.Context, opts RunOpts) Response {
+	return c.invokeContext(ctx, opts, nil)
 }
 
 // RunStream executes a prompt and emits normalized streaming events as they arrive.
 func (c Client) RunStream(opts RunOpts, emit func(StreamEvent)) Response {
-	return c.invoke(opts, emit)
+	return c.RunStreamContext(context.Background(), opts, emit)
+}
+
+// RunStreamContext executes a prompt and emits normalized streaming events as they arrive.
+func (c Client) RunStreamContext(ctx context.Context, opts RunOpts, emit func(StreamEvent)) Response {
+	return c.invokeContext(ctx, opts, emit)
 }
 
 // runDirect executes a prompt without hooks or terminal event emission.
 // Used internally by CompactThread to avoid triggering hooks for internal calls.
 func (c Client) runDirect(opts RunOpts) Response {
-	return c.run(opts, nil)
+	return c.runContext(context.Background(), opts, nil)
 }
 
 // invoke is the full lifecycle wrapper for both threaded and non-threaded paths.
@@ -291,6 +336,10 @@ func (c Client) runDirect(opts RunOpts) Response {
 //  9. CLI post_run shell command
 //  10. Library PostRun callback
 func (c Client) invoke(opts RunOpts, emit func(StreamEvent)) Response {
+	return c.invokeContext(context.Background(), opts, emit)
+}
+
+func (c Client) invokeContext(ctx context.Context, opts RunOpts, emit func(StreamEvent)) Response {
 	b, ok := c.Backends[opts.Backend]
 	if !ok {
 		resp := Response{Error: "backend not configured: " + opts.Backend, Backend: opts.Backend}
@@ -299,7 +348,7 @@ func (c Client) invoke(opts RunOpts, emit func(StreamEvent)) Response {
 	}
 
 	// 1. Library PreRun callback, 2. Thread prep, 3-4. Shell pre-hooks
-	thread, original, model, err := c.invokePrePhase(&opts, b)
+	thread, original, model, err := c.invokePrePhaseContext(ctx, &opts, b)
 	if err != nil {
 		resp := Response{Error: err.Error(), Backend: opts.Backend, ThreadID: opts.ThreadID}
 		emitFinal(emit, finalEvent(resp))
@@ -309,9 +358,9 @@ func (c Client) invoke(opts RunOpts, emit func(StreamEvent)) Response {
 	// 5. Backend execution (+ 6. thread persistence if threaded)
 	var resp Response
 	if thread != nil {
-		resp = c.runThreaded(opts, emit, thread, original)
+		resp = c.runThreadedContext(ctx, opts, emit, thread, original)
 	} else {
-		resp = c.run(opts, emit)
+		resp = c.runContext(ctx, opts, emit)
 	}
 
 	// 7. Emit terminal stream event
@@ -326,6 +375,10 @@ func (c Client) invoke(opts RunOpts, emit func(StreamEvent)) Response {
 // invokePrePhase runs lifecycle steps 1-4: library callback, thread prep, shell pre-hooks.
 // Returns the thread (nil if non-threaded), original prompt, resolved model, and any abort error.
 func (c Client) invokePrePhase(opts *RunOpts, b Backend) (*Thread, string, string, error) {
+	return c.invokePrePhaseContext(context.Background(), opts, b)
+}
+
+func (c Client) invokePrePhaseContext(ctx context.Context, opts *RunOpts, b Backend) (*Thread, string, string, error) {
 	// 1. Library PreRun callback
 	if opts.PreRun != nil {
 		if err := opts.PreRun(opts); err != nil {
@@ -352,14 +405,14 @@ func (c Client) invokePrePhase(opts *RunOpts, b Backend) (*Thread, string, strin
 
 	// 3. Config pre_run shell command
 	if b.PreRunCmd != "" {
-		if err := runPreHook(b.PreRunCmd, hookEnvPre(*opts, model)); err != nil {
+		if err := runPreHookContext(ctx, b.PreRunCmd, hookEnvPre(*opts, model)); err != nil {
 			return nil, "", "", fmt.Errorf("config pre_run hook: %w", err)
 		}
 	}
 
 	// 4. CLI pre_run shell command
 	if opts.PreRunCmd != "" {
-		if err := runPreHook(opts.PreRunCmd, hookEnvPre(*opts, model)); err != nil {
+		if err := runPreHookContext(ctx, opts.PreRunCmd, hookEnvPre(*opts, model)); err != nil {
 			return nil, "", "", fmt.Errorf("cli pre_run hook: %w", err)
 		}
 	}
@@ -390,8 +443,12 @@ func (c Client) invokePostPhase(opts RunOpts, b Backend, model, originalPrompt s
 // runThreaded handles thread preparation and persistence around the core run.
 // Steps 2 (load) and 6 (persist) from the invoke lifecycle.
 func (c Client) runThreaded(opts RunOpts, emit func(StreamEvent), thread *Thread, original string) Response {
+	return c.runThreadedContext(context.Background(), opts, emit, thread, original)
+}
+
+func (c Client) runThreadedContext(ctx context.Context, opts RunOpts, emit func(StreamEvent), thread *Thread, original string) Response {
 	var streamSaveErr error
-	resp := c.run(opts, func(event StreamEvent) {
+	resp := c.runContext(ctx, opts, func(event StreamEvent) {
 		event.ThreadID = opts.ThreadID
 		if event.Type == "session" && event.Session != "" {
 			thread.NativeSessions[opts.Backend] = event.Session
@@ -452,7 +509,11 @@ func hookEnvPost(opts RunOpts, model string, resp Response) []string {
 
 // runPreHook executes a pre-run shell command via sh -c. Non-zero exit aborts the run.
 func runPreHook(cmdStr string, env []string) error {
-	cmd := exec.Command("sh", "-c", cmdStr)
+	return runPreHookContext(context.Background(), cmdStr, env)
+}
+
+func runPreHookContext(ctx context.Context, cmdStr string, env []string) error {
+	cmd := commandForContext(ctx, "sh", "-c", cmdStr)
 	cmd.Env = env
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
@@ -483,30 +544,53 @@ func runPostHook(cmdStr string, env []string, result string) {
 }
 
 func (c Client) run(opts RunOpts, emit func(StreamEvent)) Response {
+	return c.runContext(context.Background(), opts, emit)
+}
+
+type execMeta struct {
+	ExitCode int
+	Stderr   string
+}
+
+func (c Client) runContext(ctx context.Context, opts RunOpts, emit func(StreamEvent)) Response {
 	b, ok := c.Backends[opts.Backend]
 	if !ok {
 		return Response{Error: "backend not configured: " + opts.Backend, Backend: opts.Backend}
 	}
 
-	cmd, err := buildCmd(b, opts)
+	cmd, err := buildCmdContext(ctx, b, opts)
 	if err != nil {
 		return Response{Error: err.Error(), Backend: opts.Backend}
 	}
 
 	var result, session string
+	var meta execMeta
 
 	switch b.Format {
 	case "jsonl":
-		result, session, err = runJSONL(cmd, b, opts.Backend, emit)
+		result, session, meta, err = runJSONLWithMeta(cmd, b, opts.Backend, emit)
 	default:
-		result, session, err = runJSON(cmd, b)
+		result, session, meta, err = runJSONWithMeta(cmd, b)
 	}
 
-	resp := Response{Result: result, Session: session, Backend: opts.Backend}
+	if session == "" && opts.SessionID != "" {
+		session = opts.SessionID
+	}
+
+	resp := Response{
+		Result:   result,
+		Session:  session,
+		Backend:  opts.Backend,
+		ExitCode: meta.ExitCode,
+		Stderr:   meta.Stderr,
+	}
+	populateExecMeta(&resp, err)
 	if err != nil {
 		log.Printf("%s error: %v", opts.Backend, err)
 		if errors.Is(err, exec.ErrNotFound) {
 			resp.Error = fmt.Sprintf("%q not found in PATH. Is %s installed? See https://github.com/1broseidon/oneagent/blob/main/docs/troubleshooting.md", cmd.Path, opts.Backend)
+		} else if ctxErr := contextError(ctx, err); ctxErr != nil {
+			resp.Error = ctxErr.Error()
 		} else if result != "" {
 			resp.Error = result
 		} else {
@@ -516,6 +600,32 @@ func (c Client) run(opts RunOpts, emit func(StreamEvent)) Response {
 	}
 
 	return resp
+}
+
+func contextError(ctx context.Context, err error) error {
+	if ctx == nil || err == nil {
+		return nil
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	return nil
+}
+
+func populateExecMeta(resp *Response, err error) {
+	if err == nil {
+		return
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return
+	}
+	if resp.ExitCode == 0 {
+		resp.ExitCode = exitErr.ExitCode()
+	}
+	if resp.Stderr == "" && len(exitErr.Stderr) > 0 {
+		resp.Stderr = string(exitErr.Stderr)
+	}
 }
 
 // substArgs replaces {variables} in a command template.
@@ -584,39 +694,51 @@ func containsVar(tmpl []string, v string) bool {
 }
 
 func runJSON(cmd *exec.Cmd, b Backend) (result, session string, err error) {
+	result, session, _, err = runJSONWithMeta(cmd, b)
+	return result, session, err
+}
+
+func runJSONWithMeta(cmd *exec.Cmd, b Backend) (result, session string, meta execMeta, err error) {
 	out, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			log.Printf("stderr: %s", exitErr.Stderr)
+			meta.ExitCode = exitErr.ExitCode()
+			meta.Stderr = string(exitErr.Stderr)
 		}
-		return "", "", err
+		return "", "", meta, err
 	}
 
 	var blob map[string]any
 	if err := json.Unmarshal(out, &blob); err != nil {
-		return strings.TrimSpace(string(out)), "", nil
+		return strings.TrimSpace(string(out)), "", meta, nil
 	}
 
 	if b.ErrorWhen != "" && matchWhen(blob, b.ErrorWhen) {
 		errMsg, _ := jsonGet(blob, b.Error).(string)
 		if errMsg != "" {
-			return errMsg, "", fmt.Errorf("%s", errMsg)
+			return errMsg, "", meta, fmt.Errorf("%s", errMsg)
 		}
 	}
 	result, _ = jsonGet(blob, b.Result).(string)
 	session, _ = jsonGet(blob, b.Session).(string)
-	return result, session, nil
+	return result, session, meta, nil
 }
 
 func runJSONL(cmd *exec.Cmd, b Backend, backend string, emit func(StreamEvent)) (result, session string, err error) {
+	result, session, _, err = runJSONLWithMeta(cmd, b, backend, emit)
+	return result, session, err
+}
+
+func runJSONLWithMeta(cmd *exec.Cmd, b Backend, backend string, emit func(StreamEvent)) (result, session string, meta execMeta, err error) {
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return "", "", err
+		return "", "", meta, err
 	}
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
-		return "", "", err
+		return "", "", meta, err
 	}
 
 	scanner := bufio.NewScanner(stdout)
@@ -625,12 +747,19 @@ func runJSONL(cmd *exec.Cmd, b Backend, backend string, emit func(StreamEvent)) 
 	scanErr := scanner.Err()
 
 	if err = cmd.Wait(); err != nil {
+		meta.Stderr = stderr.String()
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			meta.ExitCode = exitErr.ExitCode()
+		}
 		if s := stderr.String(); s != "" {
 			log.Printf("stderr: %s", strings.TrimSpace(s))
 		}
 		if result == "" && lastErr != "" {
 			result = lastErr
 		}
+	} else if stderr.Len() > 0 {
+		meta.Stderr = stderr.String()
 	}
 	if scanErr != nil {
 		log.Printf("scanner error: %v", scanErr)
@@ -640,7 +769,7 @@ func runJSONL(cmd *exec.Cmd, b Backend, backend string, emit func(StreamEvent)) 
 			err = scanErr
 		}
 	}
-	return result, session, err
+	return result, session, meta, err
 }
 
 func extractField(line map[string]any, when, field string) string {
@@ -714,8 +843,17 @@ func jsonGet(m map[string]any, path string) any {
 			continue
 		}
 		if arr, ok := cur.([]any); ok {
+			if len(arr) == 0 {
+				return nil
+			}
 			var idx int
-			if _, err := fmt.Sscanf(p, "%d", &idx); err != nil || idx < 0 || idx >= len(arr) {
+			if _, err := fmt.Sscanf(p, "%d", &idx); err != nil {
+				return nil
+			}
+			if idx < 0 {
+				idx = len(arr) + idx
+			}
+			if idx < 0 || idx >= len(arr) {
 				return nil
 			}
 			cur = arr[idx]
