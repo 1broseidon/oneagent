@@ -2,6 +2,12 @@
 
 All notable changes to oneagent are documented here.
 
+## [0.11.9] - 2026-03-20
+
+### Fixed
+
+- Backends that exit non-zero but produce a valid result (e.g. Cline exits 1 on success) are now treated as successful instead of overwriting the result with an error.
+
 ## [0.11.8] - 2026-03-20
 
 ### Added

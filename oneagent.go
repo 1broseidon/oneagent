@@ -550,8 +550,9 @@ func (c Client) run(opts RunOpts, emit func(StreamEvent)) Response {
 }
 
 type execMeta struct {
-	ExitCode int
-	Stderr   string
+	ExitCode         int
+	Stderr           string
+	ResultFromStream bool
 }
 
 func (c Client) runContext(ctx context.Context, opts RunOpts, emit func(StreamEvent)) Response {
@@ -588,17 +589,28 @@ func (c Client) runContext(ctx context.Context, opts RunOpts, emit func(StreamEv
 	}
 	populateExecMeta(&resp, err)
 	if err != nil {
-		log.Printf("%s error: %v", opts.Backend, err)
 		if errors.Is(err, exec.ErrNotFound) {
+			log.Printf("%s error: %v", opts.Backend, err)
 			resp.Error = fmt.Sprintf("%q not found in PATH. Is %s installed? See https://github.com/1broseidon/oneagent/blob/main/docs/troubleshooting.md", cmd.Path, opts.Backend)
+			return resp
 		} else if ctxErr := contextError(ctx, err); ctxErr != nil {
+			log.Printf("%s error: %v", opts.Backend, err)
 			resp.Error = ctxErr.Error()
+			return resp
+		} else if meta.ResultFromStream {
+			// Backend exited non-zero but produced a valid result from the
+			// stream (e.g. cline exits 1 on success). Treat as success.
+			log.Printf("%s exited with %v but produced a result; treating as success", opts.Backend, err)
 		} else if result != "" {
+			// result came from the stream error path (lastErr fallback)
+			log.Printf("%s error: %s", opts.Backend, result)
 			resp.Error = result
+			return resp
 		} else {
+			log.Printf("%s error: %v", opts.Backend, err)
 			resp.Error = err.Error()
+			return resp
 		}
-		return resp
 	}
 
 	return resp
@@ -748,6 +760,8 @@ func runJSONLWithMeta(cmd *exec.Cmd, b Backend, backend string, emit func(Stream
 	result, session, lastErr := scanJSONL(scanner, b, backend, emit)
 	scanErr := scanner.Err()
 
+	resultFromStream := result != ""
+
 	if err = cmd.Wait(); err != nil {
 		meta.Stderr = stderr.String()
 		var exitErr *exec.ExitError
@@ -771,6 +785,7 @@ func runJSONLWithMeta(cmd *exec.Cmd, b Backend, backend string, emit func(Stream
 			err = scanErr
 		}
 	}
+	meta.ResultFromStream = resultFromStream
 	return result, session, meta, err
 }
 
@@ -836,10 +851,11 @@ func appendResult(result *string, next string, appendMode bool) {
 }
 
 // jsonGet walks a dot-separated path into a map.
+// When encountering a JSON string while traversing, it parses it automatically.
 func jsonGet(m map[string]any, path string) any {
 	parts := strings.Split(path, ".")
 	var cur any = m
-	for _, p := range parts {
+	for i, p := range parts {
 		if obj, ok := cur.(map[string]any); ok {
 			cur = obj[p]
 			continue
@@ -860,6 +876,35 @@ func jsonGet(m map[string]any, path string) any {
 			}
 			cur = arr[idx]
 			continue
+		}
+		// If cur is a string and we have more path segments, try parsing as JSON
+		if str, ok := cur.(string); ok && i < len(parts)-1 {
+			var parsed any
+			if err := json.Unmarshal([]byte(str), &parsed); err == nil {
+				cur = parsed
+				// Re-process this path segment with the parsed value
+				if obj, ok := cur.(map[string]any); ok {
+					cur = obj[p]
+					continue
+				}
+				if arr, ok := cur.([]any); ok {
+					if len(arr) == 0 {
+						return nil
+					}
+					var idx int
+					if _, err := fmt.Sscanf(p, "%d", &idx); err != nil {
+						return nil
+					}
+					if idx < 0 {
+						idx = len(arr) + idx
+					}
+					if idx < 0 || idx >= len(arr) {
+						return nil
+					}
+					cur = arr[idx]
+					continue
+				}
+			}
 		}
 		return nil
 	}
