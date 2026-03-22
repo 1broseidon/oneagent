@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -642,24 +643,44 @@ func populateExecMeta(resp *Response, err error) {
 	}
 }
 
+var inlineOptionalArgPattern = regexp.MustCompile(`(?:=|:)\{[a-z_]+\}$`)
+
 // substArgs replaces {variables} in a command template.
 // When a variable resolves to empty, the preceding flag is also dropped.
+// Inline assignment tokens like key={value} are also dropped cleanly when the
+// placeholder is empty, which keeps config-driven backends backend-agnostic.
 func substArgs(tmpl []string, vars map[string]string) []string {
 	out := make([]string, 0, len(tmpl))
 	for _, t := range tmpl {
 		val := t
+		hadEmptyVar := false
 		for k, v := range vars {
-			val = strings.ReplaceAll(val, "{"+k+"}", v)
+			placeholder := "{" + k + "}"
+			if strings.Contains(val, placeholder) && v == "" {
+				hadEmptyVar = true
+			}
+			val = strings.ReplaceAll(val, placeholder, v)
 		}
 		if val == "" {
-			if len(out) > 0 && strings.HasPrefix(out[len(out)-1], "-") {
-				out = out[:len(out)-1]
+			out = dropDanglingFlag(out)
+			continue
+		}
+		if hadEmptyVar && inlineOptionalArgPattern.MatchString(t) && (strings.HasSuffix(val, "=") || strings.HasSuffix(val, ":")) {
+			if !strings.HasPrefix(t, "-") {
+				out = dropDanglingFlag(out)
 			}
 			continue
 		}
 		out = append(out, val)
 	}
 	return out
+}
+
+func dropDanglingFlag(args []string) []string {
+	if len(args) > 0 && strings.HasPrefix(args[len(args)-1], "-") {
+		return args[:len(args)-1]
+	}
+	return args
 }
 
 // resolveProgram finds a program binary. It checks $PATH first, then falls back

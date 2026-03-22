@@ -48,7 +48,7 @@ Command templates use `{variable}` placeholders:
 - `{cwd}` — working directory (from `-C` flag)
 - `{session}` — native session ID for resume
 
-When a variable is empty, both the variable and its preceding flag are dropped. So `--model {model}` disappears cleanly when no model is specified.
+When a variable is empty, both the variable and its preceding flag are dropped. So `--model {model}` disappears cleanly when no model is specified. Inline assignment forms like `-c model_reasoning_effort={thinking}` also disappear cleanly when the placeholder is empty.
 
 ## Match Conditions
 

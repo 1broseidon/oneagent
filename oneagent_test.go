@@ -482,6 +482,26 @@ func TestEmptyVariableDropsPrecedingFlag(t *testing.T) {
 	}
 }
 
+func TestEmptyInlineAssignmentDropsPrecedingFlag(t *testing.T) {
+	tmpl := []string{"agent", "-c", "model_reasoning_effort={thinking}", "--prompt", "{prompt}"}
+	vars := map[string]string{"thinking": "", "prompt": "hello"}
+	got := substArgs(tmpl, vars)
+	want := []string{"agent", "--prompt", "hello"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("args = %v, want %v", got, want)
+	}
+}
+
+func TestEmptyInlineAssignmentSelfContainedFlagDropsOnlyToken(t *testing.T) {
+	tmpl := []string{"agent", "--model={model}", "--prompt", "{prompt}"}
+	vars := map[string]string{"model": "", "prompt": "hello"}
+	got := substArgs(tmpl, vars)
+	want := []string{"agent", "--prompt", "hello"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("args = %v, want %v", got, want)
+	}
+}
+
 func TestSystemPromptPrependedOnFirstMessage(t *testing.T) {
 	b := Backend{
 		Cmd:          []string{"agent", "--prompt", "{prompt}"},

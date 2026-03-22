@@ -2,6 +2,12 @@
 
 All notable changes to oneagent are documented here.
 
+## [0.11.10] - 2026-03-21
+
+### Fixed
+
+- Empty inline-assignment template args like `-c model_reasoning_effort={thinking}` now drop cleanly when the placeholder is unset instead of leaving invalid backend-specific fragments behind.
+
 ## [0.11.9] - 2026-03-20
 
 ### Fixed
