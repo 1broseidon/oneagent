@@ -14,12 +14,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
+	"time"
 )
 
 // Backend defines how to invoke and parse output from an agent CLI.
@@ -60,14 +63,16 @@ type Response struct {
 
 // StreamEvent is a normalized incremental event emitted during a streaming run.
 type StreamEvent struct {
-	Type     string `json:"type"`
-	Backend  string `json:"backend"`
-	ThreadID string `json:"thread_id,omitempty"`
-	Session  string `json:"session,omitempty"`
-	Activity string `json:"activity,omitempty"`
-	Delta    string `json:"delta,omitempty"`
-	Result   string `json:"result,omitempty"`
-	Error    string `json:"error,omitempty"`
+	Type     string    `json:"type"`
+	RunID    string    `json:"run_id,omitempty"`
+	TS       time.Time `json:"ts,omitempty"`
+	Backend  string    `json:"backend"`
+	ThreadID string    `json:"thread_id,omitempty"`
+	Session  string    `json:"session,omitempty"`
+	Activity string    `json:"activity,omitempty"`
+	Delta    string    `json:"delta,omitempty"`
+	Result   string    `json:"result,omitempty"`
+	Error    string    `json:"error,omitempty"`
 }
 
 // HookContext is passed to the PostRun callback after a backend invocation completes.
@@ -122,6 +127,9 @@ type LoadOptions struct {
 var embeddedBackends []byte
 
 var (
+	runCounter        atomic.Uint64
+	heartbeatInterval = 10 * time.Second
+
 	_ = (*Client).invokePrePhase
 	_ = (*Client).runThreaded
 	_ = runPreHook
@@ -323,7 +331,7 @@ func (c Client) RunStreamContext(ctx context.Context, opts RunOpts, emit func(St
 // runDirect executes a prompt without hooks or terminal event emission.
 // Used internally by CompactThread to avoid triggering hooks for internal calls.
 func (c Client) runDirect(opts RunOpts) Response {
-	return c.runContext(context.Background(), opts, nil)
+	return c.runContext(context.Background(), opts, nil, newStreamRunMeta(opts.Backend, opts.ThreadID))
 }
 
 // invoke is the full lifecycle wrapper for both threaded and non-threaded paths.
@@ -343,10 +351,11 @@ func (c Client) invoke(opts RunOpts, emit func(StreamEvent)) Response {
 }
 
 func (c Client) invokeContext(ctx context.Context, opts RunOpts, emit func(StreamEvent)) Response {
+	runMeta := newStreamRunMeta(opts.Backend, opts.ThreadID)
 	b, ok := c.Backends[opts.Backend]
 	if !ok {
 		resp := Response{Error: "backend not configured: " + opts.Backend, Backend: opts.Backend}
-		emitFinal(emit, finalEvent(resp))
+		emitFinal(emit, finalEvent(runMeta, resp))
 		return resp
 	}
 
@@ -354,20 +363,23 @@ func (c Client) invokeContext(ctx context.Context, opts RunOpts, emit func(Strea
 	thread, original, model, err := c.invokePrePhaseContext(ctx, &opts, b)
 	if err != nil {
 		resp := Response{Error: err.Error(), Backend: opts.Backend, ThreadID: opts.ThreadID}
-		emitFinal(emit, finalEvent(resp))
+		emitFinal(emit, finalEvent(runMeta, resp))
 		return resp
+	}
+	if opts.ThreadID != runMeta.ThreadID {
+		runMeta.ThreadID = opts.ThreadID
 	}
 
 	// 5. Backend execution (+ 6. thread persistence if threaded)
 	var resp Response
 	if thread != nil {
-		resp = c.runThreadedContext(ctx, opts, emit, thread, original)
+		resp = c.runThreadedContext(ctx, opts, emit, thread, original, runMeta)
 	} else {
-		resp = c.runContext(ctx, opts, emit)
+		resp = c.runContext(ctx, opts, emit, runMeta)
 	}
 
 	// 7. Emit terminal stream event
-	emitFinal(emit, finalEvent(resp))
+	emitFinal(emit, finalEvent(runMeta, resp))
 
 	// 8-10. Post-run hooks and callback
 	c.invokePostPhase(opts, b, model, original, resp)
@@ -446,10 +458,10 @@ func (c Client) invokePostPhase(opts RunOpts, b Backend, model, originalPrompt s
 // runThreaded handles thread preparation and persistence around the core run.
 // Steps 2 (load) and 6 (persist) from the invoke lifecycle.
 func (c Client) runThreaded(opts RunOpts, emit func(StreamEvent), thread *Thread, original string) Response {
-	return c.runThreadedContext(context.Background(), opts, emit, thread, original)
+	return c.runThreadedContext(context.Background(), opts, emit, thread, original, newStreamRunMeta(opts.Backend, opts.ThreadID))
 }
 
-func (c Client) runThreadedContext(ctx context.Context, opts RunOpts, emit func(StreamEvent), thread *Thread, original string) Response {
+func (c Client) runThreadedContext(ctx context.Context, opts RunOpts, emit func(StreamEvent), thread *Thread, original string, runMeta streamRunMeta) Response {
 	var streamSaveErr error
 	resp := c.runContext(ctx, opts, func(event StreamEvent) {
 		event.ThreadID = opts.ThreadID
@@ -460,7 +472,7 @@ func (c Client) runThreadedContext(ctx context.Context, opts RunOpts, emit func(
 			}
 		}
 		emitEvent(emit, event)
-	})
+	}, runMeta)
 	if streamSaveErr != nil {
 		resp.Error = "thread save failed: " + streamSaveErr.Error()
 	}
@@ -547,7 +559,7 @@ func runPostHook(cmdStr string, env []string, result string) {
 }
 
 func (c Client) run(opts RunOpts, emit func(StreamEvent)) Response {
-	return c.runContext(context.Background(), opts, emit)
+	return c.runContext(context.Background(), opts, emit, newStreamRunMeta(opts.Backend, opts.ThreadID))
 }
 
 type execMeta struct {
@@ -556,7 +568,22 @@ type execMeta struct {
 	ResultFromStream bool
 }
 
-func (c Client) runContext(ctx context.Context, opts RunOpts, emit func(StreamEvent)) Response {
+type streamRunMeta struct {
+	RunID    string
+	Backend  string
+	ThreadID string
+}
+
+func newStreamRunMeta(backend, threadID string) streamRunMeta {
+	id := runCounter.Add(1)
+	return streamRunMeta{
+		RunID:    fmt.Sprintf("run-%d-%d", time.Now().UnixNano(), id),
+		Backend:  backend,
+		ThreadID: threadID,
+	}
+}
+
+func (c Client) runContext(ctx context.Context, opts RunOpts, emit func(StreamEvent), runMeta streamRunMeta) Response {
 	b, ok := c.Backends[opts.Backend]
 	if !ok {
 		return Response{Error: "backend not configured: " + opts.Backend, Backend: opts.Backend}
@@ -572,9 +599,9 @@ func (c Client) runContext(ctx context.Context, opts RunOpts, emit func(StreamEv
 
 	switch b.Format {
 	case "jsonl":
-		result, session, meta, err = runJSONLWithMeta(cmd, b, opts.Backend, emit)
+		result, session, meta, err = runJSONLWithMeta(ctx, cmd, b, runMeta, emit)
 	default:
-		result, session, meta, err = runJSONWithMeta(cmd, b)
+		result, session, meta, err = runJSONWithMeta(ctx, cmd, b, runMeta, emit)
 	}
 
 	if session == "" && opts.SessionID != "" {
@@ -729,19 +756,44 @@ func containsVar(tmpl []string, v string) bool {
 }
 
 func runJSON(cmd *exec.Cmd, b Backend) (result, session string, err error) {
-	result, session, _, err = runJSONWithMeta(cmd, b)
+	result, session, _, err = runJSONWithMeta(context.Background(), cmd, b, newStreamRunMeta("", ""), nil)
 	return result, session, err
 }
 
-func runJSONWithMeta(cmd *exec.Cmd, b Backend) (result, session string, meta execMeta, err error) {
-	out, err := cmd.Output()
+func runJSONWithMeta(ctx context.Context, cmd *exec.Cmd, b Backend, runMeta streamRunMeta, emit func(StreamEvent)) (result, session string, meta execMeta, err error) {
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			log.Printf("stderr: %s", exitErr.Stderr)
+		return "", "", meta, err
+	}
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return "", "", meta, err
+	}
+	startProcessStream(ctx, emit, runMeta)
+	stopHeartbeat := startHeartbeat(ctx, emit, runMeta)
+	defer stopHeartbeat()
+
+	out, readErr := io.ReadAll(stdout)
+	if err = cmd.Wait(); err != nil {
+		meta.Stderr = stderr.String()
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			meta.ExitCode = exitErr.ExitCode()
-			meta.Stderr = string(exitErr.Stderr)
+		}
+		if s := stderr.String(); s != "" {
+			log.Printf("stderr: %s", strings.TrimSpace(s))
+		}
+		if readErr != nil {
+			return "", "", meta, errors.Join(err, readErr)
 		}
 		return "", "", meta, err
+	}
+	if stderr.Len() > 0 {
+		meta.Stderr = stderr.String()
+	}
+	if readErr != nil {
+		return "", "", meta, readErr
 	}
 
 	var blob map[string]any
@@ -761,11 +813,11 @@ func runJSONWithMeta(cmd *exec.Cmd, b Backend) (result, session string, meta exe
 }
 
 func runJSONL(cmd *exec.Cmd, b Backend, backend string, emit func(StreamEvent)) (result, session string, err error) {
-	result, session, _, err = runJSONLWithMeta(cmd, b, backend, emit)
+	result, session, _, err = runJSONLWithMeta(context.Background(), cmd, b, newStreamRunMeta(backend, ""), emit)
 	return result, session, err
 }
 
-func runJSONLWithMeta(cmd *exec.Cmd, b Backend, backend string, emit func(StreamEvent)) (result, session string, meta execMeta, err error) {
+func runJSONLWithMeta(ctx context.Context, cmd *exec.Cmd, b Backend, runMeta streamRunMeta, emit func(StreamEvent)) (result, session string, meta execMeta, err error) {
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", "", meta, err
@@ -775,10 +827,13 @@ func runJSONLWithMeta(cmd *exec.Cmd, b Backend, backend string, emit func(Stream
 	if err := cmd.Start(); err != nil {
 		return "", "", meta, err
 	}
+	startProcessStream(ctx, emit, runMeta)
+	stopHeartbeat := startHeartbeat(ctx, emit, runMeta)
+	defer stopHeartbeat()
 
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	result, session, lastErr := scanJSONL(scanner, b, backend, emit)
+	result, session, lastErr := scanJSONL(scanner, b, runMeta, emit)
 	scanErr := scanner.Err()
 
 	resultFromStream := result != ""
@@ -819,7 +874,7 @@ func extractField(line map[string]any, when, field string) string {
 	return ""
 }
 
-func scanJSONL(scanner *bufio.Scanner, b Backend, backend string, emit func(StreamEvent)) (result, session, lastErr string) {
+func scanJSONL(scanner *bufio.Scanner, b Backend, runMeta streamRunMeta, emit func(StreamEvent)) (result, session, lastErr string) {
 	deltaField := b.Delta
 	deltaWhen := b.DeltaWhen
 	if deltaField == "" {
@@ -832,35 +887,35 @@ func scanJSONL(scanner *bufio.Scanner, b Backend, backend string, emit func(Stre
 		if err := json.Unmarshal(scanner.Bytes(), &line); err != nil {
 			continue
 		}
-		processJSONLLine(line, b, backend, emit, deltaField, deltaWhen, &result, &session, &lastErr)
+		processJSONLLine(line, b, runMeta, emit, deltaField, deltaWhen, &result, &session, &lastErr)
 	}
 	return
 }
 
-func processJSONLLine(line map[string]any, b Backend, backend string, emit func(StreamEvent), deltaField, deltaWhen string, result, session, lastErr *string) {
+func processJSONLLine(line map[string]any, b Backend, runMeta streamRunMeta, emit func(StreamEvent), deltaField, deltaWhen string, result, session, lastErr *string) {
 	if v := extractField(line, b.ErrorWhen, b.Error); v != "" {
 		*lastErr = v
 	}
 	if v := extractField(line, b.SessionWhen, b.Session); v != "" {
-		emitSession(emit, backend, session, v)
+		emitSession(emit, runMeta, session, v)
 	}
 	if v := extractField(line, b.ResultWhen, b.Result); v != "" {
 		appendResult(result, v, b.ResultAppend)
 	}
 	if v := extractTemplate(line, b.ActivityWhen, b.Activity); v != "" {
-		emitEvent(emit, StreamEvent{Type: "activity", Backend: backend, Session: *session, Activity: v})
+		emitRunEvent(emit, runMeta, StreamEvent{Type: "activity", Session: *session, Activity: v})
 	}
 	if v := extractField(line, deltaWhen, deltaField); v != "" {
-		emitEvent(emit, StreamEvent{Type: "delta", Backend: backend, Session: *session, Delta: v})
+		emitRunEvent(emit, runMeta, StreamEvent{Type: "delta", Session: *session, Delta: v})
 	}
 }
 
-func emitSession(emit func(StreamEvent), backend string, current *string, next string) {
+func emitSession(emit func(StreamEvent), runMeta streamRunMeta, current *string, next string) {
 	if next == *current {
 		return
 	}
 	*current = next
-	emitEvent(emit, StreamEvent{Type: "session", Backend: backend, Session: next})
+	emitRunEvent(emit, runMeta, StreamEvent{Type: "session", Session: next})
 }
 
 func appendResult(result *string, next string, appendMode bool) {
@@ -988,19 +1043,70 @@ func extractTemplate(line map[string]any, when, tmpl string) string {
 	return strings.Join(strings.Fields(out.String()), " ")
 }
 
-func finalEvent(resp Response) StreamEvent {
+func finalEvent(runMeta streamRunMeta, resp Response) StreamEvent {
 	event := StreamEvent{
-		Backend:  resp.Backend,
-		ThreadID: resp.ThreadID,
-		Session:  resp.Session,
+		Session: resp.Session,
 	}
 	if resp.Error != "" {
 		event.Type = "error"
 		event.Error = resp.Error
-		return event
+		return completeRunEvent(runMeta, event)
 	}
 	event.Type = "done"
 	event.Result = resp.Result
+	return completeRunEvent(runMeta, event)
+}
+
+func startProcessStream(ctx context.Context, emit func(StreamEvent), runMeta streamRunMeta) {
+	_ = ctx
+	emitRunEvent(emit, runMeta, StreamEvent{Type: "start"})
+}
+
+func startHeartbeat(ctx context.Context, emit func(StreamEvent), runMeta streamRunMeta) func() {
+	if emit == nil || heartbeatInterval <= 0 {
+		return func() {}
+	}
+	ctxDone := (<-chan struct{})(nil)
+	if ctx != nil {
+		ctxDone = ctx.Done()
+	}
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(heartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctxDone:
+				return
+			case <-ticker.C:
+				emitRunEvent(emit, runMeta, StreamEvent{Type: "heartbeat"})
+			}
+		}
+	}()
+	return func() {
+		close(done)
+	}
+}
+
+func emitRunEvent(emit func(StreamEvent), runMeta streamRunMeta, event StreamEvent) {
+	emitEvent(emit, completeRunEvent(runMeta, event))
+}
+
+func completeRunEvent(runMeta streamRunMeta, event StreamEvent) StreamEvent {
+	if event.RunID == "" {
+		event.RunID = runMeta.RunID
+	}
+	if event.TS.IsZero() {
+		event.TS = time.Now().UTC()
+	}
+	if event.Backend == "" {
+		event.Backend = runMeta.Backend
+	}
+	if event.ThreadID == "" {
+		event.ThreadID = runMeta.ThreadID
+	}
 	return event
 }
 

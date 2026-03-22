@@ -37,6 +37,33 @@ func fakeJSONL(events string) Backend {
 	}
 }
 
+func assertStreamEvents(t *testing.T, got, want []StreamEvent) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("event count = %d, want %d\ngot=%+v", len(got), len(want), got)
+	}
+	runID := got[0].RunID
+	if runID == "" {
+		t.Fatal("first event missing run id")
+	}
+	for i := range got {
+		if got[i].RunID == "" {
+			t.Fatalf("event %d missing run id: %+v", i, got[i])
+		}
+		if got[i].RunID != runID {
+			t.Fatalf("event %d run id = %q, want %q", i, got[i].RunID, runID)
+		}
+		if got[i].TS.IsZero() {
+			t.Fatalf("event %d missing timestamp: %+v", i, got[i])
+		}
+		got[i].RunID = ""
+		got[i].TS = time.Time{}
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("events = %+v, want %+v", got, want)
+	}
+}
+
 func TestJSONNormalization(t *testing.T) {
 	backends := map[string]Backend{"js": fakeJSON("hello world", "sess-1")}
 	resp := Run(backends, RunOpts{Backend: "js", Prompt: "hi"})
@@ -108,14 +135,13 @@ func TestRunStreamEmitsNormalizedEvents(t *testing.T) {
 	}
 
 	want := []StreamEvent{
+		{Type: "start", Backend: "jl"},
 		{Type: "session", Backend: "jl", Session: "sess-42"},
 		{Type: "delta", Backend: "jl", Session: "sess-42", Delta: "one"},
 		{Type: "delta", Backend: "jl", Session: "sess-42", Delta: "two"},
 		{Type: "done", Backend: "jl", Session: "sess-42", Result: "onetwo"},
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("events = %+v, want %+v", got, want)
-	}
+	assertStreamEvents(t, got, want)
 }
 
 func TestRunStreamEmitsActivityEvents(t *testing.T) {
@@ -148,14 +174,13 @@ func TestRunStreamEmitsActivityEvents(t *testing.T) {
 	}
 
 	want := []StreamEvent{
+		{Type: "start", Backend: "jl"},
 		{Type: "session", Backend: "jl", Session: "sess-42"},
 		{Type: "activity", Backend: "jl", Session: "sess-42", Activity: "Read README.md"},
 		{Type: "delta", Backend: "jl", Session: "sess-42", Delta: "one"},
 		{Type: "done", Backend: "jl", Session: "sess-42", Result: "onetwo"},
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("events = %+v, want %+v", got, want)
-	}
+	assertStreamEvents(t, got, want)
 }
 
 func TestRunStreamUsesDeltaSelectorsWhenConfigured(t *testing.T) {
@@ -186,14 +211,13 @@ func TestRunStreamUsesDeltaSelectorsWhenConfigured(t *testing.T) {
 	}
 
 	want := []StreamEvent{
+		{Type: "start", Backend: "jl"},
 		{Type: "session", Backend: "jl", Session: "sess-42"},
 		{Type: "delta", Backend: "jl", Session: "sess-42", Delta: "one"},
 		{Type: "delta", Backend: "jl", Session: "sess-42", Delta: "two"},
 		{Type: "done", Backend: "jl", Session: "sess-42", Result: "onetwo"},
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("events = %+v, want %+v", got, want)
-	}
+	assertStreamEvents(t, got, want)
 }
 
 func TestRunStreamCanUseFinalAssistantMessageForResult(t *testing.T) {
@@ -229,15 +253,14 @@ func TestRunStreamCanUseFinalAssistantMessageForResult(t *testing.T) {
 	}
 
 	want := []StreamEvent{
+		{Type: "start", Backend: "jl"},
 		{Type: "session", Backend: "jl", Session: "sess-42"},
 		{Type: "delta", Backend: "jl", Session: "sess-42", Delta: "Let me look first."},
 		{Type: "activity", Backend: "jl", Session: "sess-42", Activity: "read README.md"},
 		{Type: "delta", Backend: "jl", Session: "sess-42", Delta: "All clean."},
 		{Type: "done", Backend: "jl", Session: "sess-42", Result: "All clean."},
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("events = %+v, want %+v", got, want)
-	}
+	assertStreamEvents(t, got, want)
 }
 
 func TestJSONGetSupportsArrayIndexes(t *testing.T) {
@@ -370,6 +393,97 @@ func TestRunContextCancelsBackend(t *testing.T) {
 	}
 	if resp.Error != context.Canceled.Error() {
 		t.Fatalf("error = %q, want %q", resp.Error, context.Canceled.Error())
+	}
+}
+
+func TestRunStreamEmitsHeartbeatWithRunMetadata(t *testing.T) {
+	prev := heartbeatInterval
+	heartbeatInterval = 10 * time.Millisecond
+	defer func() { heartbeatInterval = prev }()
+
+	backends := map[string]Backend{
+		"slow": {
+			Cmd:         []string{"sh", "-c", "printf '{\"type\":\"session\",\"sid\":\"sess-42\"}\\n'; sleep 0.03; printf '{\"type\":\"delta\",\"data\":{\"text\":\"done\"}}\\n'"},
+			Format:      "jsonl",
+			Result:      "data.text",
+			ResultWhen:  "type=delta",
+			Session:     "sid",
+			SessionWhen: "type=session",
+		},
+	}
+
+	var got []StreamEvent
+	resp := RunStream(backends, RunOpts{Backend: "slow", Prompt: "hi"}, func(event StreamEvent) {
+		got = append(got, event)
+	})
+
+	if resp.Result != "done" {
+		t.Fatalf("result = %q, want done", resp.Result)
+	}
+	if len(got) < 4 {
+		t.Fatalf("got %d events, want at least 4: %+v", len(got), got)
+	}
+	if got[0].Type != "start" {
+		t.Fatalf("first event = %q, want start", got[0].Type)
+	}
+	seenHeartbeat := false
+	runID := got[0].RunID
+	for i, event := range got {
+		if event.RunID == "" || event.RunID != runID {
+			t.Fatalf("event %d has invalid run id: %+v", i, event)
+		}
+		if event.TS.IsZero() {
+			t.Fatalf("event %d missing timestamp: %+v", i, event)
+		}
+		if event.Type == "heartbeat" {
+			seenHeartbeat = true
+		}
+	}
+	if !seenHeartbeat {
+		t.Fatalf("expected heartbeat event, got %+v", got)
+	}
+	if got[len(got)-1].Type != "done" {
+		t.Fatalf("last event = %q, want done", got[len(got)-1].Type)
+	}
+}
+
+func TestRunStreamContextCancellationEmitsErrorEvent(t *testing.T) {
+	prev := heartbeatInterval
+	heartbeatInterval = 10 * time.Millisecond
+	defer func() { heartbeatInterval = prev }()
+
+	backends := map[string]Backend{
+		"slow": {
+			Cmd:    []string{"sh", "-c", "sleep 30"},
+			Format: "json",
+			Result: "result",
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	time.AfterFunc(30*time.Millisecond, cancel)
+
+	var got []StreamEvent
+	resp := RunStreamContext(ctx, backends, RunOpts{Backend: "slow", Prompt: "hi"}, func(event StreamEvent) {
+		got = append(got, event)
+	})
+
+	if resp.Error != context.Canceled.Error() {
+		t.Fatalf("error = %q, want %q", resp.Error, context.Canceled.Error())
+	}
+	if len(got) < 2 {
+		t.Fatalf("got %d events, want at least 2: %+v", len(got), got)
+	}
+	if got[0].Type != "start" {
+		t.Fatalf("first event = %q, want start", got[0].Type)
+	}
+	last := got[len(got)-1]
+	if last.Type != "error" {
+		t.Fatalf("last event = %q, want error", last.Type)
+	}
+	if last.Error != context.Canceled.Error() {
+		t.Fatalf("last error = %q, want %q", last.Error, context.Canceled.Error())
 	}
 }
 

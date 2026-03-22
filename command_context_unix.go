@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"syscall"
+	"time"
 )
 
 func applyCancelableCommandContext(cmd *exec.Cmd, ctx context.Context) {
@@ -20,12 +21,19 @@ func applyCancelableCommandContext(cmd *exec.Cmd, ctx context.Context) {
 		if cmd.Process == nil {
 			return os.ErrProcessDone
 		}
-		if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
+		pid := cmd.Process.Pid
+		if err := syscall.Kill(-pid, syscall.SIGTERM); err != nil {
 			if errors.Is(err, syscall.ESRCH) {
 				return os.ErrProcessDone
 			}
 			return err
 		}
+		go func() {
+			timer := time.NewTimer(5 * time.Second)
+			defer timer.Stop()
+			<-timer.C
+			_ = syscall.Kill(-pid, syscall.SIGKILL)
+		}()
 		return nil
 	}
 }

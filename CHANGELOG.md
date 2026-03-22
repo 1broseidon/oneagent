@@ -2,6 +2,16 @@
 
 All notable changes to oneagent are documented here.
 
+## [0.11.11] - 2026-03-22
+
+### Added
+
+- Streaming run telemetry now includes `run_id` and `ts` on normalized events, plus synthetic `start` and periodic `heartbeat` events emitted by the library while a backend process is alive.
+
+### Changed
+
+- JSON-format backends now use the same start/heartbeat-aware process execution path as JSONL streaming runs, improving observability without changing the public `Run*` APIs.
+
 ## [0.11.10] - 2026-03-21
 
 ### Fixed

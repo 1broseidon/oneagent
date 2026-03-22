@@ -84,10 +84,14 @@ resp := client.RunStream(oneagent.RunOpts{
 	CWD:     "/path/to/project",
 }, func(ev oneagent.StreamEvent) {
 	switch ev.Type {
+	case "start":
+		fmt.Println("run:", ev.RunID, "started at", ev.TS)
 	case "session":
 		fmt.Println("session:", ev.Session)
 	case "activity":
 		fmt.Println("activity:", ev.Activity)
+	case "heartbeat":
+		fmt.Println("heartbeat:", ev.RunID, ev.TS)
 	case "delta":
 		fmt.Print(ev.Delta)
 	case "done":
@@ -101,6 +105,8 @@ if resp.Error != "" {
 	log.Fatal(resp.Error)
 }
 ```
+
+Every streamed event includes a per-attempt `RunID` and timestamp `TS`. `start` and `heartbeat` are emitted by the library itself, so callers can supervise long-running backends without backend-specific parsing.
 
 The event types are intentionally small: `session`, `activity`, `delta`, `done`, and `error`.
 

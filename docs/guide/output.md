@@ -51,10 +51,12 @@ oa --jsonl "review the repo"
 ```
 
 ```json
-{"type":"session","backend":"claude","session":"abc123-def456"}
-{"type":"activity","backend":"claude","session":"abc123-def456","activity":"Read README.md"}
-{"type":"delta","backend":"claude","session":"abc123-def456","delta":"OK"}
-{"type":"done","backend":"claude","session":"abc123-def456","result":"OK"}
+{"type":"start","run_id":"run-...","ts":"2026-03-22T15:04:05Z","backend":"claude"}
+{"type":"session","run_id":"run-...","ts":"2026-03-22T15:04:05Z","backend":"claude","session":"abc123-def456"}
+{"type":"activity","run_id":"run-...","ts":"2026-03-22T15:04:06Z","backend":"claude","session":"abc123-def456","activity":"Read README.md"}
+{"type":"heartbeat","run_id":"run-...","ts":"2026-03-22T15:04:15Z","backend":"claude"}
+{"type":"delta","run_id":"run-...","ts":"2026-03-22T15:04:16Z","backend":"claude","session":"abc123-def456","delta":"OK"}
+{"type":"done","run_id":"run-...","ts":"2026-03-22T15:04:16Z","backend":"claude","session":"abc123-def456","result":"OK"}
 ```
 
-Events are intentionally simple: `session`, optional `activity`, optional `delta`, then `done` or `error`.
+Events are intentionally simple: `start`, optional `session` / `activity` / `delta`, library-emitted `heartbeat` while the process is alive, then `done` or `error`. `run_id` and `ts` let supervisors distinguish attempts and detect stalls without backend-specific parsing.

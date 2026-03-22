@@ -210,14 +210,17 @@ func TestRunWithThreadStreamEmitsThreadEventsAndPersistsSession(t *testing.T) {
 	if resp.ThreadID != "ts" {
 		t.Fatalf("thread_id = %q, want ts", resp.ThreadID)
 	}
-	if len(got) != 3 {
-		t.Fatalf("events = %+v, want 3 events", got)
+	if len(got) != 4 {
+		t.Fatalf("events = %+v, want 4 events", got)
 	}
-	if got[0].Type != "session" || got[0].ThreadID != "ts" {
-		t.Fatalf("first event = %+v, want session with thread id", got[0])
+	if got[0].Type != "start" || got[0].ThreadID != "ts" {
+		t.Fatalf("first event = %+v, want start with thread id", got[0])
 	}
-	if got[2].Type != "done" || got[2].ThreadID != "ts" {
-		t.Fatalf("final event = %+v, want done with thread id", got[2])
+	if got[1].Type != "session" || got[1].ThreadID != "ts" {
+		t.Fatalf("second event = %+v, want session with thread id", got[1])
+	}
+	if got[3].Type != "done" || got[3].ThreadID != "ts" {
+		t.Fatalf("final event = %+v, want done with thread id", got[3])
 	}
 
 	thread, err := LoadThread("ts")
