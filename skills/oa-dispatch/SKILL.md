@@ -24,8 +24,10 @@ Do not dispatch vague or open-ended tasks. The receiving agent has no access to 
 Always pipe the prompt into `oa` instead of passing it as an argument. This keeps prompt content out of process listings (`ps aux`):
 
 ```bash
-echo "<prompt>" | oa -b <backend> -m <model>
+echo "<prompt>" | oa -b <backend> -m <model> --thinking <level>
 ```
+
+All flags are optional. `--thinking` controls reasoning effort — supported levels vary by backend (e.g. `low`, `medium`, `high`). Omit it to use the backend's default.
 
 For background execution with streaming visibility:
 
@@ -71,19 +73,20 @@ Always include **"Do not ask for confirmation, just make the edits"** or similar
 
 Built-in backends:
 
-| Backend    | Command        | Best for                          |
-|------------|----------------|-----------------------------------|
-| `claude`   | `oa -b claude` | Default, general-purpose          |
-| `codex`    | `oa -b codex`  | Sandboxed execution               |
-| `opencode` | `oa -b opencode` | OpenCode-supported models       |
-| `pi`       | `oa -b pi`     | Wide model selection via Pi       |
+| Backend    | Command          | `--thinking` | Best for                    |
+|------------|------------------|--------------|-----------------------------|
+| `claude`   | `oa -b claude`   | yes          | Default, general-purpose    |
+| `codex`    | `oa -b codex`    | yes          | Sandboxed execution         |
+| `opencode` | `oa -b opencode` | no           | OpenCode-supported models   |
+| `pi`       | `oa -b pi`       | yes          | Wide model selection via Pi |
+| `gemini`   | `oa -b gemini`   | no           | Gemini CLI models           |
 
-To use a specific model through a backend that supports model routing:
+To use a specific model or thinking level:
 
 ```bash
 echo "prompt" | oa -b pi -m openai-codex/gpt-5.4
-echo "prompt" | oa -b opencode -m ollama/llama3.1
-echo "prompt" | oa -b claude -m sonnet
+echo "prompt" | oa -b claude -m sonnet --thinking high
+echo "prompt" | oa -b codex --thinking high
 ```
 
 Run `oa list` to see all configured backends.
