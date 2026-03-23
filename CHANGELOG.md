@@ -2,6 +2,12 @@
 
 All notable changes to oneagent are documented here.
 
+## [0.11.12] - 2026-03-23
+
+### Fixed
+
+- Deduplicate concurrent thread turn recording to prevent duplicate messages when multiple writers (e.g. synthesis and main conversation) write to the same thread simultaneously.
+
 ## [0.11.11] - 2026-03-22
 
 ### Added
