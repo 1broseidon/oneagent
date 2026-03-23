@@ -261,19 +261,41 @@ func prepareThreadPrompt(thread *Thread, opts *RunOpts) {
 }
 
 // recordTurns appends the user prompt and assistant response to the thread.
+// It deduplicates against the last turn to prevent concurrent writers from
+// recording the same content twice.
 func (t *Thread) recordTurns(original string, resp Response, source string) {
 	now := time.Now().UTC().Format(time.RFC3339)
-	t.Turns = append(t.Turns,
-		Turn{Role: "user", Content: original, Backend: resp.Backend, Source: source, TS: now},
-	)
-	if resp.Result != "" && resp.Error == "" {
+	if !t.lastTurnMatches("user", original) {
 		t.Turns = append(t.Turns,
-			Turn{Role: "assistant", Content: resp.Result, Backend: resp.Backend, Source: source, TS: now},
+			Turn{Role: "user", Content: original, Backend: resp.Backend, Source: source, TS: now},
 		)
+	}
+	if resp.Result != "" && resp.Error == "" {
+		if !t.lastTurnMatches("assistant", resp.Result) {
+			t.Turns = append(t.Turns,
+				Turn{Role: "assistant", Content: resp.Result, Backend: resp.Backend, Source: source, TS: now},
+			)
+		}
 	}
 	if resp.Session != "" {
 		t.NativeSessions[resp.Backend] = resp.Session
 	}
+}
+
+// lastTurnMatches returns true if the most recent turn with the given role
+// has identical content, indicating a duplicate from concurrent recording.
+func (t *Thread) lastTurnMatches(role, content string) bool {
+	for i := len(t.Turns) - 1; i >= 0; i-- {
+		if t.Turns[i].Role == role {
+			return t.Turns[i].Content == content
+		}
+		// Only check the most recent turn of each role — stop if we hit
+		// the opposite role first (normal alternating pattern).
+		if t.Turns[i].Role != role {
+			return false
+		}
+	}
+	return false
 }
 
 // RunWithThread wraps Run with thread load/save and context injection.
