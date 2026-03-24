@@ -2,6 +2,16 @@
 
 All notable changes to oneagent are documented here.
 
+## [0.11.13] - 2026-03-24
+
+### Added
+
+- `Warnings` field on `Response` — populated from stderr when the backend succeeds but emits diagnostics.
+
+### Fixed
+
+- Backend errors now surface descriptive messages from stderr instead of generic `"exit status 1"`, enabling agent self-healing on invalid parameters.
+
 ## [0.11.12] - 2026-03-23
 
 ### Fixed

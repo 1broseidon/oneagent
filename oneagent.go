@@ -57,6 +57,7 @@ type Response struct {
 	ThreadID string `json:"thread_id,omitempty"`
 	Backend  string `json:"backend"`
 	Error    string `json:"error,omitempty"`
+	Warnings string `json:"warnings,omitempty"`
 	ExitCode int    `json:"exit_code,omitempty"`
 	Stderr   string `json:"stderr,omitempty"`
 }
@@ -636,9 +637,14 @@ func (c Client) runContext(ctx context.Context, opts RunOpts, emit func(StreamEv
 			return resp
 		} else {
 			log.Printf("%s error: %v", opts.Backend, err)
-			resp.Error = err.Error()
+			resp.Error = stderrOrError(resp.Stderr, err)
 			return resp
 		}
+	}
+
+	// Surface stderr as warnings when backend succeeded but emitted diagnostics.
+	if resp.Stderr != "" && resp.Error == "" {
+		resp.Warnings = strings.TrimSpace(resp.Stderr)
 	}
 
 	return resp
@@ -652,6 +658,16 @@ func contextError(ctx context.Context, err error) error {
 		return ctxErr
 	}
 	return nil
+}
+
+// stderrOrError returns stderr content if available, otherwise the raw error message.
+// This ensures agents see the backend's descriptive error (e.g. "invalid thinking level,
+// valid values: ...") instead of a generic "exit status 1".
+func stderrOrError(stderr string, err error) string {
+	if s := strings.TrimSpace(stderr); s != "" {
+		return s
+	}
+	return err.Error()
 }
 
 func populateExecMeta(resp *Response, err error) {

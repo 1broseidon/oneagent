@@ -555,6 +555,32 @@ func TestMissingBackend(t *testing.T) {
 	}
 }
 
+func TestThinkingPassthrough(t *testing.T) {
+	b := Backend{
+		Cmd: []string{"agent", "--thinking", "{thinking}", "--prompt", "{prompt}"},
+	}
+
+	// Value passes through raw to the backend
+	cmd, err := buildCmd(b, RunOpts{Backend: "t", Prompt: "hi", Thinking: "high"})
+	if err != nil {
+		t.Fatalf("buildCmd error: %v", err)
+	}
+	got := strings.Join(cmd.Args, " ")
+	if !strings.Contains(got, "--thinking high") {
+		t.Fatalf("expected raw passthrough, got: %s", got)
+	}
+
+	// Empty thinking drops the flag
+	cmd, err = buildCmd(b, RunOpts{Backend: "t", Prompt: "hi"})
+	if err != nil {
+		t.Fatalf("buildCmd error: %v", err)
+	}
+	got = strings.Join(cmd.Args, " ")
+	if strings.Contains(got, "--thinking") {
+		t.Fatalf("expected no --thinking flag when empty, got: %s", got)
+	}
+}
+
 func TestDefaultModelUsed(t *testing.T) {
 	// The fake backend echoes the prompt which includes the model via template.
 	backends := map[string]Backend{
