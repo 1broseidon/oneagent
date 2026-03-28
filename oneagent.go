@@ -48,6 +48,7 @@ type Backend struct {
 	PromptStdin  bool     // pass prompt via stdin instead of argv
 	PreRunCmd    string   // shell command to run before backend execution
 	PostRunCmd   string   // shell command to run after backend execution
+	Probe        string   // optional fast command to verify the backend is ready (e.g. "claude --version")
 }
 
 // Response is the normalized output from any backend.
@@ -760,6 +761,35 @@ func ResolveBackendProgram(b Backend) (string, bool) {
 	}
 	// resolveProgram returned the bare name — not found
 	return b.Cmd[0], false
+}
+
+// PreflightCheck validates that a backend is runnable before any job is queued.
+// It verifies the CLI binary exists on disk and, when a Probe command is
+// configured, executes it to catch missing API keys or auth issues early.
+func (c Client) PreflightCheck(backend string) error {
+	b, ok := c.Backends[backend]
+	if !ok {
+		return fmt.Errorf("unknown backend %q", backend)
+	}
+	return PreflightCheckBackend(backend, b)
+}
+
+// PreflightCheckBackend validates a single Backend without requiring a Client.
+func PreflightCheckBackend(name string, b Backend) error {
+	prog, found := ResolveBackendProgram(b)
+	if !found {
+		return fmt.Errorf("backend %q: CLI %q not found in $PATH or configured paths %v", name, prog, b.Paths)
+	}
+	if b.Probe == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "sh", "-c", b.Probe).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("backend %q probe failed: %v\n%s", name, err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func containsVar(tmpl []string, v string) bool {

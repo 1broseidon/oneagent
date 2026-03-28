@@ -952,3 +952,68 @@ func mapsKeys(backends map[string]Backend) []string {
 	}
 	return keys
 }
+
+func TestPreflightCheckBackend_CLINotFound(t *testing.T) {
+	b := Backend{
+		Cmd:   []string{"nonexistent-binary-xyz"},
+		Paths: []string{"/tmp/does-not-exist"},
+	}
+	err := PreflightCheckBackend("test", b)
+	if err == nil {
+		t.Fatal("expected error for missing CLI binary")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected 'not found' in error, got: %s", err)
+	}
+}
+
+func TestPreflightCheckBackend_CLIFound(t *testing.T) {
+	// "true" exists on every UNIX system
+	b := Backend{
+		Cmd: []string{"true"},
+	}
+	err := PreflightCheckBackend("test", b)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestPreflightCheckBackend_ProbeFailure(t *testing.T) {
+	b := Backend{
+		Cmd:   []string{"true"},
+		Probe: "false",
+	}
+	err := PreflightCheckBackend("test", b)
+	if err == nil {
+		t.Fatal("expected error for failing probe")
+	}
+	if !strings.Contains(err.Error(), "probe failed") {
+		t.Fatalf("expected 'probe failed' in error, got: %s", err)
+	}
+}
+
+func TestPreflightCheckBackend_ProbeSuccess(t *testing.T) {
+	b := Backend{
+		Cmd:   []string{"true"},
+		Probe: "echo ok",
+	}
+	err := PreflightCheckBackend("test", b)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestPreflightCheckBackend_UnknownBackend(t *testing.T) {
+	client := Client{
+		Backends: map[string]Backend{
+			"claude": {Cmd: []string{"true"}},
+		},
+	}
+	err := client.PreflightCheck("nonexistent")
+	if err == nil {
+		t.Fatal("expected error for unknown backend")
+	}
+	if !strings.Contains(err.Error(), "unknown backend") {
+		t.Fatalf("expected 'unknown backend' in error, got: %s", err)
+	}
+}

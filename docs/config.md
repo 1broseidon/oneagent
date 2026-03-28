@@ -42,6 +42,7 @@ Each backend is a JSON object with these fields:
 | `prompt_stdin` | no | If `true`, pass the prompt via stdin instead of as a command-line argument. Keeps prompts out of `ps` output |
 | `pre_run` | no | Shell command to run before every invocation of this backend. Exit non-zero aborts the run |
 | `post_run` | no | Shell command to run after every invocation. Result piped to stdin. Best-effort |
+| `probe` | no | Fast shell command to verify the backend is ready (e.g. `claude --version`). Used by `PreflightCheck` to catch missing API keys or auth issues before work is queued. Must exit 0 to pass |
 
 ## Template Variables
 

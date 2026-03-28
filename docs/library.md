@@ -198,6 +198,40 @@ Post-run shell hooks receive the result on stdin and environment variables: `OA_
 
 Hooks from the backend config (`pre_run`/`post_run` fields) and hooks from `RunOpts` both execute — config first, then per-invocation. Pre-run hooks abort the run on non-zero exit. Post-run hooks are best-effort.
 
+## Preflight Checks
+
+Validate that a backend is runnable before queuing work. This catches missing CLI binaries and auth issues instantly instead of failing minutes later during execution:
+
+```go
+// Check via Client (looks up the backend by name)
+if err := client.PreflightCheck("gemini"); err != nil {
+	log.Fatalf("backend not ready: %v", err)
+}
+
+// Or check a Backend directly (no Client needed)
+b := backends["claude"]
+if err := oneagent.PreflightCheckBackend("claude", b); err != nil {
+	log.Fatalf("backend not ready: %v", err)
+}
+```
+
+Preflight performs two checks:
+
+1. **Binary resolution** — verifies the CLI binary exists in `$PATH` or the backend's configured `paths`.
+2. **Probe** (optional) — if the backend has a `"probe"` command configured (e.g. `"claude --version"`), it runs it with a 10-second timeout. This catches missing API keys, expired auth tokens, or broken installations.
+
+All built-in backends ship with default probe commands. Custom backends can add one via the `"probe"` field in `backends.json`:
+
+```json
+{
+  "my-backend": {
+    "run": "my-agent -p {prompt}",
+    "probe": "my-agent --version",
+    ...
+  }
+}
+```
+
 ## Typical Integration Pattern
 
 Most applications follow this pattern:

@@ -2,6 +2,14 @@
 
 All notable changes to oneagent are documented here.
 
+## [0.12.0] - 2026-03-28
+
+### Added
+
+- **Preflight checks** — `PreflightCheck` and `PreflightCheckBackend` validate that a backend CLI exists and is ready before any work is queued. Catches missing binaries and auth issues instantly instead of failing minutes later during execution.
+- **`Probe` field** on `Backend` — optional fast command (e.g. `claude --version`) that runs during preflight to verify the backend is functional beyond just being installed. Configured via the `"probe"` key in `backends.json`.
+- Default probe commands added for all built-in backends: `claude`, `codex`, `opencode`, `pi`, `gemini`.
+
 ## [0.11.13] - 2026-03-24
 
 ### Added

@@ -200,6 +200,30 @@ Hooks from the backend config (`pre_run`/`post_run` fields) and hooks from `RunO
 
 See the [Hooks guide](/guide/hooks) for the full reference.
 
+## Preflight Checks
+
+Validate that a backend is runnable before queuing work. This catches missing CLI binaries and auth issues instantly:
+
+```go
+// Check via Client (looks up the backend by name)
+if err := client.PreflightCheck("gemini"); err != nil {
+	log.Fatalf("backend not ready: %v", err)
+}
+
+// Or check a Backend directly (no Client needed)
+b := backends["claude"]
+if err := oneagent.PreflightCheckBackend("claude", b); err != nil {
+	log.Fatalf("backend not ready: %v", err)
+}
+```
+
+Preflight performs two checks:
+
+1. **Binary resolution** — verifies the CLI binary exists in `$PATH` or the backend's configured `paths`.
+2. **Probe** (optional) — if the backend has a `probe` command configured (e.g. `claude --version`), it runs it with a 10-second timeout. This catches missing API keys, expired auth tokens, or broken installations.
+
+All built-in backends ship with default probe commands. Custom backends can add one via the `"probe"` field in `backends.json`.
+
 ## Typical Integration Pattern
 
 Most applications follow this pattern:
