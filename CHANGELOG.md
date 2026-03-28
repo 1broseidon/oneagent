@@ -2,7 +2,7 @@
 
 All notable changes to oneagent are documented here.
 
-## [0.12.0] - 2026-03-28
+## [0.12.1] - 2026-03-28
 
 ### Added
 
