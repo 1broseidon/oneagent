@@ -52,6 +52,7 @@ Command templates use `{variable}` placeholders:
 - `{model}` — model override (from `-m` flag or config default)
 - `{cwd}` — working directory (from `-C` flag)
 - `{session}` — native session ID for resume
+- `{system}` — system prompt text (from `Backend.SystemPrompt`). When present in the command template, the system prompt is passed via the native CLI flag instead of being prepended to the user message. Backends without `{system}` in their template fall back to prepend
 
 When a variable is empty, both the variable and its preceding flag are dropped. So `--model {model}` disappears cleanly when no model is specified. Inline assignment forms like `-c model_reasoning_effort={thinking}` also disappear cleanly when the placeholder is empty.
 

@@ -2,6 +2,13 @@
 
 All notable changes to oneagent are documented here.
 
+## [0.12.2] - 2026-03-28
+
+### Added
+
+- **Native system prompt routing** — new `{system}` template variable in backend run commands. When a backend's command template includes `{system}`, the system prompt is passed via the CLI's native flag (e.g. `--append-system-prompt`, `--system`) instead of being prepended to the user message. This gives models higher-weight system-level instructions and frees up user-message context.
+- Default backends updated: `claude` uses `--append-system-prompt {system}`, `pi` uses `--append-system-prompt {system}`, `opencode` uses `--system {system}`. Codex and Gemini fall back to prompt prepend (no CLI flag available yet).
+
 ## [0.12.1] - 2026-03-28
 
 ### Added

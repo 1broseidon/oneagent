@@ -248,6 +248,11 @@ func buildPrompt(b Backend, opts RunOpts) string {
 	if opts.SessionID != "" || b.SystemPrompt == "" {
 		return opts.Prompt
 	}
+	// If the run command routes {system} via a native CLI flag, don't
+	// also prepend it into the user prompt.
+	if containsVar(b.Cmd, "{system}") {
+		return opts.Prompt
+	}
 	return b.SystemPrompt + "\n\n" + opts.Prompt
 }
 
@@ -259,6 +264,7 @@ func buildCommandArgs(b Backend, opts RunOpts, prompt, model string) ([]string, 
 		"thinking": opts.Thinking,
 		"cwd":      opts.CWD,
 		"session":  opts.SessionID,
+		"system":   b.SystemPrompt,
 	})
 	if len(args) == 0 {
 		return nil, nil, fmt.Errorf("backend %q produced an empty command", opts.Backend)

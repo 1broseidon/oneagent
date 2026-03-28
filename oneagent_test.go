@@ -1017,3 +1017,61 @@ func TestPreflightCheckBackend_UnknownBackend(t *testing.T) {
 		t.Fatalf("expected 'unknown backend' in error, got: %s", err)
 	}
 }
+
+func TestBuildPromptSkipsPrependWhenTemplateHasSystem(t *testing.T) {
+	// Backend with {system} in Cmd — should NOT prepend.
+	b := Backend{
+		Cmd:          []string{"agent", "-p", "{prompt}", "--system-prompt", "{system}"},
+		SystemPrompt: "You are a test bot.",
+	}
+	got := buildPrompt(b, RunOpts{Prompt: "hello"})
+	if got != "hello" {
+		t.Fatalf("expected bare prompt when {system} in template, got: %q", got)
+	}
+
+	// Backend without {system} in Cmd — should prepend.
+	b2 := Backend{
+		Cmd:          []string{"agent", "-p", "{prompt}"},
+		SystemPrompt: "You are a test bot.",
+	}
+	got2 := buildPrompt(b2, RunOpts{Prompt: "hello"})
+	want2 := "You are a test bot.\n\nhello"
+	if got2 != want2 {
+		t.Fatalf("expected prepended prompt, got: %q", got2)
+	}
+}
+
+func TestSubstArgsIncludesSystem(t *testing.T) {
+	tmpl := []string{"agent", "--system", "{system}", "-p", "{prompt}"}
+	args := substArgs(tmpl, map[string]string{
+		"system": "Be helpful.",
+		"prompt": "hello",
+	})
+	want := []string{"agent", "--system", "Be helpful.", "-p", "hello"}
+	if len(args) != len(want) {
+		t.Fatalf("args = %v, want %v", args, want)
+	}
+	for i := range want {
+		if args[i] != want[i] {
+			t.Fatalf("args[%d] = %q, want %q", i, args[i], want[i])
+		}
+	}
+}
+
+func TestSubstArgsDropsEmptySystem(t *testing.T) {
+	tmpl := []string{"agent", "--system", "{system}", "-p", "{prompt}"}
+	args := substArgs(tmpl, map[string]string{
+		"system": "",
+		"prompt": "hello",
+	})
+	// Empty system should drop both --system and {system}
+	want := []string{"agent", "-p", "hello"}
+	if len(args) != len(want) {
+		t.Fatalf("args = %v, want %v", args, want)
+	}
+	for i := range want {
+		if args[i] != want[i] {
+			t.Fatalf("args[%d] = %q, want %q", i, args[i], want[i])
+		}
+	}
+}

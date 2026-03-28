@@ -1,6 +1,6 @@
 {
   "claude": {
-    "run": "claude -p {prompt} --model {model} --effort {thinking} --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions",
+    "run": "claude -p {prompt} --model {model} --effort {thinking} --append-system-prompt {system} --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions",
     "resume": "+ --resume {session}",
     "format": "jsonl",
     "prompt_stdin": true,
@@ -37,7 +37,7 @@
     "probe": "codex --version"
   },
   "opencode": {
-    "run": "opencode run {prompt} --format json --dir {cwd} --model {model}",
+    "run": "opencode run {prompt} --format json --dir {cwd} --model {model} --system {system}",
     "resume": "+ --session {session}",
     "format": "jsonl",
     "prompt_stdin": true,
@@ -53,7 +53,7 @@
     "probe": "opencode version"
   },
   "pi": {
-    "run": "pi -p {prompt} --mode json --model {model} --thinking {thinking}",
+    "run": "pi -p {prompt} --mode json --model {model} --thinking {thinking} --append-system-prompt {system}",
     "resume": "+ --session {session}",
     "format": "jsonl",
     "prompt_stdin": true,
