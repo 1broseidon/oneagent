@@ -52,6 +52,24 @@ func (s FilesystemStore) dir() string {
 	return ThreadDir()
 }
 
+func (s FilesystemStore) path(id string) string {
+	return filepath.Join(s.dir(), id+".json")
+}
+
+func threadFilePath(store Store, id string) (string, bool) {
+	switch s := store.(type) {
+	case FilesystemStore:
+		return s.path(id), true
+	case *FilesystemStore:
+		if s == nil {
+			return "", false
+		}
+		return s.path(id), true
+	default:
+		return "", false
+	}
+}
+
 func validateThreadID(id string) error {
 	switch {
 	case id == ".", id == "..":
@@ -238,6 +256,41 @@ func (t *Thread) CompileContext(budget int) (string, bool) {
 	return strings.Join(parts, "\n\n"), truncated
 }
 
+// CompileRecentTurns builds a minimal context string from the most recent turns.
+func (t *Thread) CompileRecentTurns(maxTurns, budget int) (string, bool) {
+	if maxTurns <= 0 {
+		maxTurns = 2
+	}
+	if budget <= 0 {
+		budget = 4096
+	}
+
+	var lines []string
+	used := len("Conversation:\n")
+	truncated := false
+
+	for i := len(t.Turns) - 1; i >= 0; i-- {
+		if len(lines) >= maxTurns {
+			break
+		}
+		line := t.Turns[i].Role + ": " + t.Turns[i].Content
+		if used+len(line)+1 > budget {
+			truncated = true
+			break
+		}
+		lines = append(lines, line)
+		used += len(line) + 1
+	}
+
+	for i, j := 0, len(lines)-1; i < j; i, j = i+1, j-1 {
+		lines[i], lines[j] = lines[j], lines[i]
+	}
+	if len(lines) == 0 {
+		return "", truncated
+	}
+	return "Conversation:\n" + strings.Join(lines, "\n"), truncated
+}
+
 // lastTurnBackend returns the backend that produced the most recent turn, or "".
 func (t *Thread) lastTurnBackend() string {
 	if len(t.Turns) == 0 {
@@ -246,17 +299,145 @@ func (t *Thread) lastTurnBackend() string {
 	return t.Turns[len(t.Turns)-1].Backend
 }
 
-// prepareThreadPrompt injects thread context into opts if no native session exists.
-func prepareThreadPrompt(thread *Thread, opts *RunOpts) {
+// threadFileMetadata reads the thread JSON file and returns total line count
+// and the line number where the last turn's JSON object starts.
+func threadFileMetadata(path string, turnCount int) (lines int, lastTurnLine int) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, 0
+	}
+	allLines := strings.Split(string(data), "\n")
+	lines = len(allLines)
+	if turnCount == 0 {
+		return lines, 0
+	}
+	// Walk backward to find the opening "{" of the last turn object.
+	// Each turn is a JSON object inside the "turns" array.
+	braceDepth := 0
+	turnsFound := 0
+	for i := len(allLines) - 1; i >= 0; i-- {
+		trimmed := strings.TrimSpace(allLines[i])
+		// Count closing braces (enter objects) and opening braces (exit objects).
+		if strings.HasPrefix(trimmed, "}") {
+			braceDepth++
+		}
+		if strings.HasPrefix(trimmed, "{") {
+			braceDepth--
+			if braceDepth == 0 {
+				turnsFound++
+				// We want the start of the last user+assistant pair (2 turn objects).
+				if turnsFound >= 2 {
+					lastTurnLine = i + 1 // 1-indexed
+					return
+				}
+			}
+		}
+	}
+	// Fallback: couldn't find enough turns, point near the end.
+	if lines > 50 {
+		return lines, lines - 50
+	}
+	return lines, 1
+}
+
+// threadTopicSummary extracts a short topic list from user turns.
+// It takes the first ~12 words of each user message as a topic hint,
+// deduplicates, and returns a compact one-line summary.
+func threadTopicSummary(turns []Turn) string {
+	seen := make(map[string]bool)
+	var topics []string
+	for _, t := range turns {
+		if t.Role != "user" {
+			continue
+		}
+		msg := strings.TrimSpace(t.Content)
+		if msg == "" {
+			continue
+		}
+		words := strings.Fields(msg)
+		limit := 12
+		if len(words) < limit {
+			limit = len(words)
+		}
+		snippet := strings.Join(words[:limit], " ")
+		if len(words) > limit {
+			snippet += "..."
+		}
+		key := strings.ToLower(snippet)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		topics = append(topics, snippet)
+	}
+	if len(topics) == 0 {
+		return ""
+	}
+	return strings.Join(topics, " | ")
+}
+
+// threadTimeRange returns the timestamps of the first and last turns.
+func threadTimeRange(turns []Turn) (first, last string) {
+	if len(turns) == 0 {
+		return "", ""
+	}
+	first = turns[0].TS
+	last = turns[len(turns)-1].TS
+	// Trim to date only for compactness.
+	if len(first) >= 10 {
+		first = first[:10]
+	}
+	if len(last) >= 10 {
+		last = last[:10]
+	}
+	return
+}
+
+// prepareThreadPrompt injects portable thread handoff instructions into opts if no native session exists.
+func prepareThreadPrompt(thread *Thread, store Store, opts *RunOpts) {
 	// Only reuse a native session if this backend was the last to contribute.
-	// If another backend spoke since, replay canonical context instead.
+	// If another backend spoke since, point the backend at the canonical thread file.
 	if sid, ok := thread.NativeSessions[opts.Backend]; ok && opts.SessionID == "" && thread.lastTurnBackend() == opts.Backend {
 		opts.SessionID = sid
 		return
 	}
 	if len(thread.Turns) > 0 && opts.SessionID == "" {
+		if path, ok := threadFilePath(store, thread.ID); ok {
+			totalLines, lastTurnLine := threadFileMetadata(path, len(thread.Turns))
+			firstDate, lastDate := threadTimeRange(thread.Turns)
+			topics := threadTopicSummary(thread.Turns)
+
+			var meta strings.Builder
+			meta.WriteString("You are continuing conversation thread \"" + thread.ID + "\".\n")
+			meta.WriteString("Thread file: " + path + "\n")
+			if totalLines > 0 {
+				meta.WriteString(fmt.Sprintf("Lines: %d\n", totalLines))
+			}
+			if lastTurnLine > 0 {
+				meta.WriteString(fmt.Sprintf("Last turn starts at line: %d\n", lastTurnLine))
+			}
+			meta.WriteString(fmt.Sprintf("Turns: %d", len(thread.Turns)))
+			if firstDate != "" && lastDate != "" {
+				if firstDate == lastDate {
+					meta.WriteString(fmt.Sprintf(" (%s)", firstDate))
+				} else {
+					meta.WriteString(fmt.Sprintf(" (%s to %s)", firstDate, lastDate))
+				}
+			}
+			meta.WriteString("\n")
+			if topics != "" {
+				meta.WriteString("Topics: " + topics + "\n")
+			}
+			meta.WriteString("Read the thread JSON file and continue from the last turn.\n\n")
+			meta.WriteString("Current user message:\n" + opts.Prompt)
+
+			opts.Prompt = meta.String()
+			return
+		}
 		ctx, _ := thread.CompileContext(32768)
-		opts.Prompt = ctx + "\n\nNew request:\n" + opts.Prompt
+		if strings.TrimSpace(ctx) != "" {
+			opts.Prompt = ctx + "\n\nCurrent user message:\n" + opts.Prompt
+		}
 	}
 }
 

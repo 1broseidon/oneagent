@@ -32,6 +32,16 @@ func resumeDetectBackend(session string) Backend {
 	}
 }
 
+func echoPromptBackend() Backend {
+	return Backend{
+		Cmd:         []string{"sh", "-c", `python3 -c 'import json,sys; print(json.dumps({"result": sys.stdin.read(), "session": "sess"}))'`},
+		Format:      "json",
+		Result:      "result",
+		Session:     "session",
+		PromptStdin: true,
+	}
+}
+
 func setupThreadHome(t *testing.T) {
 	t.Helper()
 	home := t.TempDir()
@@ -545,9 +555,38 @@ func TestCrossBackendReplaysCanonicalContext(t *testing.T) {
 		t.Fatalf("A->B->A error: %s", resp.Error)
 	}
 	// If native session were reused, result would be "RESUMED".
-	// Canonical replay uses Cmd (not ResumeCmd), so result should be "FRESH".
+	// Portable fallback uses Cmd (not ResumeCmd), so result should be "FRESH".
 	if resp.Result == "RESUMED" {
-		t.Fatal("A->B->A should replay canonical context, not reuse stale native session")
+		t.Fatal("A->B->A should use portable fallback, not reuse stale native session")
+	}
+}
+
+func TestCrossBackendPromptUsesThreadFileHandoff(t *testing.T) {
+	setupThreadHome(t)
+
+	backends := map[string]Backend{
+		"a": staticBackend("ok-a", "sess-a"),
+		"b": echoPromptBackend(),
+	}
+
+	RunWithThread(backends, RunOpts{Backend: "a", Prompt: "step one", ThreadID: "handoff"})
+	resp := RunWithThread(backends, RunOpts{Backend: "b", Prompt: "step two", ThreadID: "handoff"})
+	if resp.Error != "" {
+		t.Fatalf("cross-backend handoff error: %s", resp.Error)
+	}
+	wantPath := filepath.Join(ThreadDir(), "handoff.json")
+	for _, want := range []string{
+		`You are continuing conversation thread "handoff".`,
+		"Thread file: " + wantPath,
+		"Read the thread JSON file and continue from the last turn.",
+		"Current user message:\nstep two",
+	} {
+		if !strings.Contains(resp.Result, want) {
+			t.Fatalf("prompt = %q, want substring %q", resp.Result, want)
+		}
+	}
+	if strings.Contains(resp.Result, "New request:") {
+		t.Fatalf("prompt should not contain legacy replay marker: %q", resp.Result)
 	}
 }
 

@@ -414,11 +414,12 @@ func (c Client) invokePrePhaseContext(ctx context.Context, opts *RunOpts, b Back
 	original := opts.Prompt
 	if opts.ThreadID != "" {
 		var err error
-		thread, err = c.threadStore().LoadThread(opts.ThreadID)
+		store := c.threadStore()
+		thread, err = store.LoadThread(opts.ThreadID)
 		if err != nil {
 			return nil, "", "", err
 		}
-		prepareThreadPrompt(thread, opts)
+		prepareThreadPrompt(thread, store, opts)
 	}
 
 	model := opts.Model

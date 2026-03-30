@@ -2,6 +2,17 @@
 
 All notable changes to oneagent are documented here.
 
+## [0.13.0] - 2026-03-30
+
+### Added
+
+- Portable thread handoff metadata for cross-backend continuation — when oneagent cannot safely resume a native session on the current backend, it now points the agent at the canonical thread JSON file and includes line count, last-turn line offset, turn count/date range, and a compact topic summary so the next backend can recover context efficiently from the source of truth.
+- Regression test covering cross-backend thread-file handoff prompts.
+
+### Changed
+
+- Cross-backend fallback now prefers a canonical thread-file handoff prompt over large inlined replay context when the thread store exposes a filesystem path.
+
 ## [0.12.2] - 2026-03-28
 
 ### Added
